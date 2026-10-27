@@ -688,13 +688,15 @@ def test_archy_score_rejects_strict_tolerance_outside_unit_interval(acyclic_proj
                 strict_tolerance=tolerance,
             )
         assert str(caught.value) == message
-        with pytest.raises(ToolError) as tool_caught:
+        # mcp 2.x ToolError is "Error executing tool archy_score" without the
+        # underlying ValueError text; 1.x keeps it. The exact message is pinned
+        # on the direct _run_score raise above.
+        with pytest.raises(ToolError):
             _call_tool(
                 server,
                 "archy_score",
                 {"path": path, "strict": strict, "strict_tolerance": tolerance},
             )
-        assert message in str(tool_caught.value)
 
     reject(5.0, strict=True)
     reject(-0.1, strict=True)
