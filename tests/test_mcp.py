@@ -630,6 +630,92 @@ def test_run_score_strict_includes_gate_block(acyclic_project: Path):
     assert payload.gate.tolerance == 0.02
 
 
+def _seed_score_history(project: Path, overall: float) -> None:
+    """Write one history row so the strict gate has a previous overall to compare."""
+    history = project / ".archy" / "history.jsonl"
+    history.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "timestamp": "2026-05-09T13:45:07Z",
+        "commit": "deadbee",
+        "branch": "main",
+        "score": {
+            "overall": overall,
+            "modularity": 0.5,
+            "acyclicity": 1.0,
+            "depth": 0.5,
+            "equality": 0.5,
+            "complexity": 1.0,
+        },
+        "inputs": {
+            "module_count": 3,
+            "edge_count": 1,
+            "cycle_count": 0,
+            "tangle_ratio": 0.0,
+            "max_depth": 1,
+            "community_count": 2,
+        },
+    }
+    history.write_text(json.dumps(row) + "\n")
+
+
+def test_archy_score_rejects_strict_tolerance_outside_unit_interval(acyclic_project: Path):
+    """`archy_score` must reject a strict_tolerance outside [0, 1].
+
+    The gate sets passed when delta >= -strict_tolerance. Both scores sit in
+    [0, 1], so delta sits in [-1, 1]. Tolerance 5.0 makes every drop pass,
+    because -1 >= -5. Tolerance -0.1 requires delta >= 0.1, so an ordinary
+    drop fails. Tolerance -5 fails even when the score improves, because no
+    delta can reach 5. The CLI already rejects these with _require.
+
+    The row below sets previous to 0.99. This acyclic fixture scores below
+    that, so delta is negative and still greater than -1. Tolerance 0.0 must
+    fail that drop. Tolerance 1.0 must pass it.
+    """
+    from archy.mcp_compat import ToolError
+
+    _seed_score_history(acyclic_project, 0.99)
+    server = create_server()
+    path = str(acyclic_project)
+
+    def reject(tolerance: float, *, strict: bool) -> None:
+        message = f"strict_tolerance must be in [0, 1]; got {tolerance}"
+        with pytest.raises(ValueError) as caught:
+            _run_score(
+                acyclic_project,
+                internal_only=True,
+                record=False,
+                strict=strict,
+                strict_tolerance=tolerance,
+            )
+        assert str(caught.value) == message
+        with pytest.raises(ToolError) as tool_caught:
+            _call_tool(
+                server,
+                "archy_score",
+                {"path": path, "strict": strict, "strict_tolerance": tolerance},
+            )
+        assert message in str(tool_caught.value)
+
+    reject(5.0, strict=True)
+    reject(-0.1, strict=True)
+    # The CLI checks the flag even when --strict is off. MCP must do the same.
+    reject(5.0, strict=False)
+
+    for tolerance, expect_passed in ((0.0, False), (1.0, True)):
+        _content, structured = _call_tool(
+            server,
+            "archy_score",
+            {"path": path, "strict": True, "strict_tolerance": tolerance},
+        )
+        assert isinstance(structured, dict)
+        gate = structured["result"]["gate"]
+        assert gate["previous"] == 0.99
+        assert gate["tolerance"] == tolerance
+        # The fixture has to be a real drop that tolerance 1.0 still allows.
+        assert -1.0 < gate["delta"] < 0
+        assert gate["passed"] is expect_passed
+
+
 def test_run_cycles_payload_shape(tmp_path: Path):
     pkg = tmp_path / "pkg"
     pkg.mkdir()

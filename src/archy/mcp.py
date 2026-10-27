@@ -63,7 +63,8 @@ with one convention, so an agent has a single recovery contract:
    / mistyped required argument. The framework rejects the call; archy does
    nothing.
 2. **Usage error -> `isError:true` (raise):** an invalid argument *value* (e.g.
-   `response_format='xml'`, `last_n=0`, `min_risk>1`), a project `path` that is
+   `response_format='xml'`, `last_n=0`, `min_risk>1`, `strict_tolerance` outside
+   `[0, 1]`), a project `path` that is
    not an existing directory (`_project_dir`, same rule as the CLI's
    `click.Path(exists=True, file_okay=False)`), a *malformed* `archy.yaml`
    (`LayerConfigError` from `load_config`), or a project over the scan ceiling
@@ -758,7 +759,8 @@ def _register_tools(server: Server) -> None:
             "project. `view='current'` (the DEFAULT) returns the five-axis score "
             "payload; optionally append the result to .archy/history.jsonl "
             "(record=True) and/or compare against the most recent recorded run as "
-            "a regression gate (strict=True). Pass record=True to record a "
+            "a regression gate (strict=True). `strict_tolerance` must be in "
+            "[0, 1] (default 0.02). Pass record=True to record a "
             "baseline at session start (replaces the removed archy_record_baseline). "
             "`view='history'` instead reads the recent score history "
             "(.archy/history.jsonl), returning up to `last_n` rows oldest-first so "
@@ -1336,6 +1338,9 @@ def _run_score(
     strict: bool,
     strict_tolerance: float,
 ) -> ScorePayload:
+    if not 0.0 <= strict_tolerance <= 1.0:
+        raise ValueError(f"strict_tolerance must be in [0, 1]; got {strict_tolerance}")
+
     graph = _load_graph(path, internal_only=internal_only)
     score = compute_score(graph)
     history_path = path / ".archy" / "history.jsonl"
