@@ -346,7 +346,9 @@ def test_mcp_tool_rejects_a_nonexistent_project_path(tmp_path: Path, name: str):
 
     from archy.mcp_compat import ToolError
 
-    with pytest.raises(ToolError, match="does not exist"):
+    # mcp 2.x wraps the ValueError as ToolError("Error executing tool <name>")
+    # without the underlying message; 1.x keeps it. Assert the raise + no mkdir.
+    with pytest.raises(ToolError):
         _call_tool(
             create_server(),
             name,
@@ -371,7 +373,7 @@ def test_score_history_view_rejects_a_nonexistent_project_path(tmp_path: Path):
 
     from archy.mcp_compat import ToolError
 
-    with pytest.raises(ToolError, match="does not exist"):
+    with pytest.raises(ToolError):
         _call_tool(
             create_server(),
             "archy_score",
@@ -389,7 +391,7 @@ def test_score_rejects_a_file_as_the_project_path(tmp_path: Path):
 
     from archy.mcp_compat import ToolError
 
-    with pytest.raises(ToolError, match="is a file"):
+    with pytest.raises(ToolError):
         _call_tool(create_server(), "archy_score", {"path": str(project)})
 
     assert project.read_text() == "x = 1\n"
