@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -2334,6 +2336,56 @@ def test_diff_with_a_missing_committed_baseline_says_how_to_create_it(tmp_path: 
 
     assert result.exit_code == 1
     assert f"archy snapshot {project} --findings-only --out {missing}" in result.output
+
+
+@pytest.mark.parametrize(
+    ("contents", "reason"),
+    [
+        ("not json\n", "invalid JSON (Expecting value: line 1 column 1 (char 0))"),
+        ("{}\n", "missing snapshot fields"),
+        ("[]\n", "expected a JSON object, got list"),
+        ('{"score": {}}\n', "missing 'components'"),
+        (
+            '{"score": {"overall": 1, "components": {"modularity": 1, "acyclicity": 1, '
+            '"depth": 1, "equality": 1, "complexity": 1}, "inputs": {}}}\n',
+            "score inputs do not match a snapshot",
+        ),
+        (b"\xff", "not valid UTF-8 (invalid start byte)"),
+    ],
+)
+def test_diff_malformed_baseline_is_a_clean_error(
+    tmp_path: Path, contents: str | bytes, reason: str
+):
+    project = tmp_path / "proj"
+    project.mkdir()
+    baseline = project / "bad.json"
+    if isinstance(contents, bytes):
+        baseline.write_bytes(contents)
+    else:
+        baseline.write_text(contents)
+
+    # The real entry point, not CliRunner. CliRunner swallows an uncaught
+    # exception into Result.exception and leaves output empty, so "Traceback"
+    # would stay absent and the test would miss the bug it exists to catch.
+    proc = subprocess.run(
+        [
+            str(Path(sys.executable).parent / "archy"),
+            "diff",
+            str(project),
+            "--baseline",
+            str(baseline),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = proc.stdout + proc.stderr
+
+    message = f"{baseline} is not a readable archy snapshot; re-run `archy snapshot`: {reason}"
+    assert proc.returncode == 1
+    assert "Traceback" not in output
+    assert str(baseline) in output
+    assert output == f"Error: {message}\n"
 
 
 def _make_sdp_ratchet_project(tmp_path: Path) -> Path:

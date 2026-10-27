@@ -963,6 +963,21 @@ def test_run_diff_without_baseline_returns_error(acyclic_project: Path):
     assert "no baseline" in result.error
 
 
+def test_run_diff_corrupt_baseline_returns_error_on_the_wire(acyclic_project: Path):
+    target = acyclic_project / ".archy" / "baseline.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("not json\n")
+
+    dumped = _run_diff(acyclic_project).model_dump()
+
+    assert dumped == {
+        "error": (
+            f"{target} is not a readable archy snapshot; re-run `archy snapshot`: "
+            "invalid JSON (Expecting value: line 1 column 1 (char 0))"
+        )
+    }
+
+
 def test_run_diff_after_snapshot_reports_zero_delta(acyclic_project: Path):
     _run_snapshot(acyclic_project)
     result = _run_diff(acyclic_project)
