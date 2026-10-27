@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -1389,6 +1391,54 @@ def test_dsm_diff_missing_baseline_errors_cleanly(tmp_path: Path):
     result = CliRunner().invoke(main, ["dsm", str(project), "--diff", str(tmp_path / "nope.json")])
     assert result.exit_code != 0
     assert "no DSM snapshot" in result.output or "no DSM snapshot" in (result.stderr or "")
+
+
+@pytest.mark.parametrize(
+    ("kind", "reason"),
+    [
+        ("not json", "Expecting value: line 1 column 1 (char 0)"),
+        ("{}", "missing 'ordering'"),
+        ("graph", "missing 'ordering'"),
+    ],
+)
+def test_dsm_diff_bad_snapshot_is_a_clean_error(tmp_path: Path, kind: str, reason: str) -> None:
+    """`archy dsm --diff` on a non-snapshot file exits 1 with the path and no traceback.
+
+    CliRunner stores an uncaught exception on Result.exception and leaves output
+    empty, so "Traceback" would be absent and this test would miss the crash.
+    """
+    project = _make_three_module_project(tmp_path)
+    bad = tmp_path / "bad.json"
+    archy = str(Path(sys.executable).parent / "archy")
+    if kind == "graph":
+        graph = subprocess.run(
+            [archy, "graph", str(project), "--format", "json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert graph.returncode == 0, graph.stderr
+        payload = json.loads(graph.stdout)
+        assert "ordering" not in payload
+        bad.write_text(graph.stdout)
+    else:
+        bad.write_text(kind)
+        if kind == "{}":
+            assert "ordering" not in json.loads(kind)
+
+    proc = subprocess.run(
+        [archy, "dsm", str(project), "--diff", str(bad)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = proc.stdout + proc.stderr
+    message = f"{bad} is not a DSM snapshot (write one with `archy dsm --format json`): {reason}"
+
+    assert proc.returncode == 1
+    assert "Traceback" not in output
+    assert str(bad) in output
+    assert output == f"Error: {message}\n"
 
 
 def test_dsm_ascii_rejects_oversized_with_helpful_message(tmp_path: Path):

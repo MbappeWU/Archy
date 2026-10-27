@@ -28,6 +28,7 @@ from archy.mcp import (
     CheckErrorPayload,
     CheckPayload,
     DiffErrorPayload,
+    DSMErrorPayload,
     DSMTooLargePayload,
     ForbiddenEdge,
     GraphPayload,
@@ -468,6 +469,20 @@ def test_dsm_diff_ignores_response_format(acyclic_project: Path, tmp_path: Path)
     write_dsm(build_dsm(_load_graph(acyclic_project, internal_only=False)), baseline)
     result = _dsm(acyclic_project, response_format="summary", baseline_path=str(baseline))
     assert isinstance(result, DSMDiff)
+
+
+def test_dsm_bad_baseline_returns_error_on_the_wire(acyclic_project: Path, tmp_path: Path):
+    baseline = tmp_path / "bad.json"
+    baseline.write_text("not json")
+    result = _dsm(acyclic_project, baseline_path=str(baseline))
+
+    assert isinstance(result, DSMErrorPayload)
+    assert result.model_dump() == {
+        "error": (
+            f"{baseline} is not a DSM snapshot (write one with `archy dsm --format json`): "
+            "Expecting value: line 1 column 1 (char 0)"
+        )
+    }
 
 
 def test_graph_default_is_summary(acyclic_project: Path):
