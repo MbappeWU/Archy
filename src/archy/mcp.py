@@ -63,7 +63,9 @@ with one convention, so an agent has a single recovery contract:
    / mistyped required argument. The framework rejects the call; archy does
    nothing.
 2. **Usage error -> `isError:true` (raise):** an invalid argument *value* (e.g.
-   `response_format='xml'`, `last_n=0`, `min_risk>1`), a *malformed* `archy.yaml`
+   `response_format='xml'`, `last_n=0`, `min_risk>1`), a project `path` that is
+   not an existing directory (`_project_dir`, same rule as the CLI's
+   `click.Path(exists=True, file_okay=False)`), a *malformed* `archy.yaml`
    (`LayerConfigError` from `load_config`), or a project over the scan ceiling
    (`ScanTooLargeError`). The caller must fix the call or the environment; a
    raised exception becomes an `isError:true` tool result the model sees.
@@ -729,6 +731,22 @@ refuses that file for the same reason; this annotation stops a client from
 running the overwrite without asking."""
 
 
+def _project_dir(path: str) -> Path:
+    """Return `path` when it is an existing directory.
+
+    Same rule as the CLI's `click.Path(exists=True, file_okay=False)`. MCP
+    tools take a bare string. `open_index` then does
+    `db_path.parent.mkdir(parents=True)`, which creates a typo path and
+    `.archy/index.db` and the empty tree scores 1.0 (#552).
+    """
+    root = Path(path)
+    if root.is_dir():
+        return root
+    if root.is_file():
+        raise ValueError(f"Directory '{path}' is a file.")
+    raise ValueError(f"Directory '{path}' does not exist.")
+
+
 def _register_tools(server: Server) -> None:
     @server.tool(
         name="archy_score",
@@ -757,12 +775,13 @@ def _register_tools(server: Server) -> None:
         strict_tolerance: float = 0.02,
         last_n: int = 10,
     ) -> ScorePayload | list[TrendRow]:
+        root = _project_dir(path)
         if view == "history":
-            return _run_trend(Path(path), last_n=last_n)
+            return _run_trend(root, last_n=last_n)
         if view != "current":
             raise ValueError(f"view must be 'current' or 'history'; got {view!r}")
         return _run_score(
-            Path(path),
+            root,
             internal_only=internal_only,
             record=record,
             strict=strict,
@@ -783,7 +802,7 @@ def _register_tools(server: Server) -> None:
         min_size: int = 2,
         internal_only: bool = True,
     ) -> list[Cycle]:
-        return _run_cycles(Path(path), min_size=min_size, internal_only=internal_only)
+        return _run_cycles(_project_dir(path), min_size=min_size, internal_only=internal_only)
 
     @server.tool(
         name="archy_check",
@@ -827,10 +846,11 @@ def _register_tools(server: Server) -> None:
         contracts: bool = False,
         contracts_config_path: str | None = None,
     ) -> CheckPayload | CheckErrorPayload:
-        result = _run_check(Path(path), config_path=Path(config_path) if config_path else None)
+        root = _project_dir(path)
+        result = _run_check(root, config_path=Path(config_path) if config_path else None)
         if contracts and isinstance(result, CheckPayload):
             payload = _run_contracts(
-                Path(path),
+                root,
                 config_filename=(Path(contracts_config_path) if contracts_config_path else None),
             )
             # Only a verdict counts as "checked". Requesting contracts and having
@@ -931,16 +951,17 @@ def _register_tools(server: Server) -> None:
         test_filter: str | None = None,
         co_change: bool = False,
     ) -> Impact | Affected:
+        root = _project_dir(path)
         _validate_impact_mode(mode)
         resolved = [Path(f) for f in files]
         if mode == "affected":
             return _run_affected(
-                Path(path),
+                root,
                 files=resolved,
                 depth=depth,
                 test_filter=test_filter,
             )
-        return _run_impact(Path(path), files=resolved, max_chains=max_chains, co_change=co_change)
+        return _run_impact(root, files=resolved, max_chains=max_chains, co_change=co_change)
 
     # removed v0.36 (#227): archy_affected folded into archy_impact(mode='affected').
 
@@ -961,7 +982,7 @@ def _register_tools(server: Server) -> None:
         ),
     )
     def archy_snapshot(path: str) -> SnapshotPayload:
-        return _run_snapshot(Path(path))
+        return _run_snapshot(_project_dir(path))
 
     @server.tool(
         name="archy_diff",
@@ -981,7 +1002,7 @@ def _register_tools(server: Server) -> None:
     def archy_diff(
         path: str, baseline: str | None = None, strict: bool = False
     ) -> DiffReport | DiffErrorPayload:
-        return _run_diff(Path(path), baseline=baseline, strict=strict)
+        return _run_diff(_project_dir(path), baseline=baseline, strict=strict)
 
     @server.tool(
         name="archy_simulate",
@@ -1009,7 +1030,7 @@ def _register_tools(server: Server) -> None:
         add: list[EdgeSpec] | None = None,
         remove: list[EdgeSpec] | None = None,
     ) -> SimulateReport:
-        return _run_simulate(Path(path), add=add or [], remove=remove or [])
+        return _run_simulate(_project_dir(path), add=add or [], remove=remove or [])
 
     # removed v0.36 (#227): archy_record_baseline folded into archy_score(record=True).
 
@@ -1052,7 +1073,7 @@ def _register_tools(server: Server) -> None:
         top_n: int = 20,
     ) -> GraphSummaryPayload | GraphPayload | GraphTooLargePayload:
         return _run_graph(
-            Path(path),
+            _project_dir(path),
             response_format=response_format,
             focus=focus,
             depth=depth,
@@ -1097,7 +1118,7 @@ def _register_tools(server: Server) -> None:
         min_risk: float = DEFAULT_MIN_RISK,
     ) -> WhatToRefactorPayload:
         return _run_what_to_refactor_next(
-            Path(path), lens=lens, top_n=top_n, since=since, min_risk=min_risk
+            _project_dir(path), lens=lens, top_n=top_n, since=since, min_risk=min_risk
         )
 
     @server.tool(
@@ -1135,7 +1156,7 @@ def _register_tools(server: Server) -> None:
         baseline_path: str | None = None,
     ) -> DSMSummary | DSM | DSMDiff | DSMTooLargePayload | DSMErrorPayload:
         return _run_dsm(
-            Path(path),
+            _project_dir(path),
             response_format=response_format,
             group_by=group_by,
             weight=weight,
@@ -1188,7 +1209,7 @@ def _register_tools(server: Server) -> None:
         near_miss: bool = False,
     ) -> DuplicatesPayload:
         return _run_duplicates(
-            Path(path),
+            _project_dir(path),
             response_format=response_format,
             min_nodes=min_nodes,
             top_n=top_n,
@@ -1244,7 +1265,9 @@ def _register_tools(server: Server) -> None:
     def archy_conventions(
         path: str, min_family: int = 2, include_tests: bool = False
     ) -> ConventionsReport:
-        return _run_conventions(Path(path), min_family=min_family, include_tests=include_tests)
+        return _run_conventions(
+            _project_dir(path), min_family=min_family, include_tests=include_tests
+        )
 
     @server.tool(
         name="archy_module_view",
@@ -1275,7 +1298,7 @@ def _register_tools(server: Server) -> None:
         ),
     )
     def archy_module_view(path: str, module: str, include_tests: bool = False) -> ModuleView:
-        return _run_module_view(Path(path), module, include_tests=include_tests)
+        return _run_module_view(_project_dir(path), module, include_tests=include_tests)
 
     # removed v0.41 (#267): archy_status demoted off the agent surface. Index
     # freshness is diagnostic plumbing, not a mid-task decision (every tool

@@ -311,6 +311,101 @@ def test_error_model_tier2_raises_tier3_returns_in_band(acyclic_project: Path):
         assert "error" in inner, f"{name} tier-3 result should carry an in-band error field"
 
 
+# Extra arguments each tool needs besides `path`. The set must match the
+# registered tools: a new tool that forgets `_project_dir` has to land here
+# or `test_project_path_guard_covers_every_registered_tool` fails, and then
+# the parametrized call below fails if the guard is not actually used.
+_PROJECT_PATH_ARGS: dict[str, dict] = {
+    "archy_score": {},
+    "archy_cycles": {},
+    "archy_check": {},
+    "archy_impact": {"files": ["pkg/a.py"]},
+    "archy_snapshot": {},
+    "archy_diff": {},
+    "archy_graph": {},
+    "archy_what_to_refactor_next": {},
+    "archy_dsm": {},
+    "archy_simulate": {},
+    "archy_duplicates": {},
+    "archy_conventions": {},
+    "archy_module_view": {"module": "pkg.a"},
+}
+
+
+@pytest.mark.parametrize("name", sorted(_PROJECT_PATH_ARGS))
+def test_mcp_tool_rejects_a_nonexistent_project_path(tmp_path: Path, name: str):
+    """A typo path fails the call and is not created on disk (#552).
+
+    The fixture is absent before the call. The CLI already rejects that with
+    click.Path(exists=True, file_okay=False). These tools used to pass the
+    string through, and open_index's mkdir(parents=True) created the path and
+    `.archy/index.db`, then scored the empty tree as 1.0.
+    """
+    missing = tmp_path / "no-such-project"
+    assert not missing.exists()
+
+    from archy.mcp_compat import ToolError
+
+    with pytest.raises(ToolError, match="does not exist"):
+        _call_tool(
+            create_server(),
+            name,
+            {"path": str(missing), **_PROJECT_PATH_ARGS[name]},
+        )
+
+    assert not missing.exists()
+    assert not (missing / ".archy" / "index.db").exists()
+
+
+def test_project_path_guard_covers_every_registered_tool():
+    server = create_server()
+    names = {tool.name for tool in asyncio.run(server.list_tools())}
+    assert set(_PROJECT_PATH_ARGS) == names
+
+
+def test_score_history_view_rejects_a_nonexistent_project_path(tmp_path: Path):
+    # `view='history'` returns before the score scan. The guard has to run
+    # first, or this branch still accepts a path the CLI would reject.
+    missing = tmp_path / "no-such-project"
+    assert not missing.exists()
+
+    from archy.mcp_compat import ToolError
+
+    with pytest.raises(ToolError, match="does not exist"):
+        _call_tool(
+            create_server(),
+            "archy_score",
+            {"path": str(missing), "view": "history"},
+        )
+
+    assert not missing.exists()
+
+
+def test_score_rejects_a_file_as_the_project_path(tmp_path: Path):
+    # click.Path(file_okay=False). A file used to score 1.0 via the cold path
+    # after mkdir failed, with the file left in place.
+    project = tmp_path / "not-a-directory"
+    project.write_text("x = 1\n")
+
+    from archy.mcp_compat import ToolError
+
+    with pytest.raises(ToolError, match="is a file"):
+        _call_tool(create_server(), "archy_score", {"path": str(project)})
+
+    assert project.read_text() == "x = 1\n"
+    assert not (tmp_path / ".archy").exists()
+
+
+def test_score_accepts_an_existing_project_directory(acyclic_project: Path):
+    # Positive control for the guard. The fixture is pkg/__init__.py, a.py,
+    # and b.py: three modules. A guard that rejects every path fails here.
+    _content, structured = _call_tool(
+        create_server(), "archy_score", {"path": str(acyclic_project)}
+    )
+    assert structured is not None
+    assert structured["result"]["inputs"]["module_count"] == 3
+
+
 # --- #226 concise-by-default response shaping ---------------------------------
 
 
