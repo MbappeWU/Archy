@@ -1352,7 +1352,10 @@ def dsm(
     )
 
     if diff_path is not None:
-        before = read_dsm(diff_path)
+        try:
+            before = read_dsm(diff_path)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         if before is None:
             raise click.ClickException(f"no DSM snapshot at {diff_path}.")
         diff = diff_dsm(before, current)

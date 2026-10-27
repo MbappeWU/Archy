@@ -1886,7 +1886,10 @@ def _run_dsm(
         package=package,
     )
     if baseline_path is not None:
-        before = read_dsm(Path(baseline_path))
+        try:
+            before = read_dsm(Path(baseline_path))
+        except ValueError as exc:
+            return DSMErrorPayload(error=str(exc))
         if before is None:
             return DSMErrorPayload(error=f"no DSM snapshot at {baseline_path}")
         return diff_dsm(before, current)

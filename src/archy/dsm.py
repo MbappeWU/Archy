@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 import networkx as nx
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 GroupBy = Literal["community", "layer", "topological"]
 Weight = Literal["imports", "calls"]
@@ -474,11 +474,27 @@ def write_dsm(dsm: DSM, path: Path) -> None:
 
 
 def read_dsm(path: Path) -> DSM | None:
+    """Load a DSM snapshot, or None when `path` does not exist.
+
+    A file that is not a DSM snapshot raises ValueError. The message names
+    the path and the reason, and tells the caller to write one with
+    `archy dsm --format json`.
+    """
     import json
 
     if not path.exists():
         return None
-    return dsm_from_dict(json.loads(path.read_text()))
+    try:
+        return dsm_from_dict(json.loads(path.read_text()))
+    except (json.JSONDecodeError, KeyError, TypeError, ValidationError) as exc:
+        if isinstance(exc, KeyError):
+            missing = exc.args[0] if exc.args else exc
+            reason = f"missing {missing!r}"
+        else:
+            reason = str(exc)
+        raise ValueError(
+            f"{path} is not a DSM snapshot (write one with `archy dsm --format json`): {reason}"
+        ) from exc
 
 
 def diff_dsm(before: DSM, after: DSM) -> DSMDiff:
