@@ -38,7 +38,7 @@ import json
 import shlex
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from archy.cycles import Cycle, CycleEdge, find_cycles
 from archy.layers import (
@@ -244,10 +244,42 @@ def write_snapshot(snap: Snapshot, path: Path, *, findings_only: bool = False) -
 
 
 def read_snapshot(path: Path) -> Snapshot | None:
+    """Load a snapshot, or None when `path` does not exist.
+
+    JSON that is not a snapshot raises ValueError. The message names `path`
+    and the reason, and tells the caller to re-run `archy snapshot`.
+    """
     if not path.exists():
         return None
-    payload = json.loads(path.read_text())
-    return _snapshot_from_dict(payload)
+    try:
+        text = path.read_text()
+    except UnicodeDecodeError as exc:
+        raise _unreadable_snapshot(path, f"not valid UTF-8 ({exc.reason})") from exc
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _unreadable_snapshot(path, f"invalid JSON ({exc})") from exc
+    if not isinstance(payload, dict):
+        got = type(payload).__name__
+        raise _unreadable_snapshot(path, f"expected a JSON object, got {got}")
+    parsed = {str(key): value for key, value in payload.items()}
+    try:
+        return _snapshot_from_dict(parsed)
+    except (KeyError, TypeError, ValueError, ValidationError) as exc:
+        raise _unreadable_snapshot(path, _snapshot_reason(exc)) from exc
+
+
+def _unreadable_snapshot(path: Path, reason: str) -> ValueError:
+    return ValueError(f"{path} is not a readable archy snapshot; re-run `archy snapshot`: {reason}")
+
+
+def _snapshot_reason(exc: BaseException) -> str:
+    if isinstance(exc, KeyError):
+        missing = exc.args[0] if exc.args else exc
+        return f"missing {missing!r}"
+    if isinstance(exc, ValidationError):
+        return "score inputs do not match a snapshot"
+    return str(exc)
 
 
 def compute_diff(baseline: Snapshot, current: Snapshot) -> DiffReport:
@@ -451,7 +483,17 @@ def _score_to_dict(s: Score) -> dict[str, object]:
     }
 
 
+def _recognized_snapshot_keys() -> frozenset[str]:
+    """Keys `snapshot_to_dict` can write. `score` is omitted when it is None."""
+    bare = Snapshot(score=None, cycles=(), violations=())
+    keys = set(snapshot_to_dict(bare)) | set(snapshot_to_dict(bare, findings_only=True))
+    keys.add("score")
+    return frozenset(keys)
+
+
 def _snapshot_from_dict(payload: dict[str, object]) -> Snapshot:
+    if _recognized_snapshot_keys().isdisjoint(payload):
+        raise ValueError("missing snapshot fields")
     raw_score = payload.get("score")
     score = None if raw_score is None else _score_from_dict(_expect_dict(raw_score))
     cycles = tuple(

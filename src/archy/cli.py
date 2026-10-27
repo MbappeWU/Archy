@@ -1079,7 +1079,10 @@ def diff(path: Path, baseline_path: Path | None, fmt: str, top_n: int, strict: b
         problem := strict_baseline_problem(path, target, suggested=Path("archy-baseline.json"))
     ):
         raise click.UsageError(problem)
-    baseline = read_snapshot(target)
+    try:
+        baseline = read_snapshot(target)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     if baseline is None:
         raise click.ClickException(
             missing_baseline_hint(path, target, committed=baseline_path is not None)

@@ -1531,7 +1531,10 @@ def _run_diff(
         problem := strict_baseline_problem(path, target, suggested=path / "archy-baseline.json")
     ):
         return DiffErrorPayload(error=problem)
-    snapshot = read_snapshot(target)
+    try:
+        snapshot = read_snapshot(target)
+    except ValueError as exc:
+        return DiffErrorPayload(error=str(exc))
     if snapshot is None:
         if baseline is not None:
             # A relative `baseline` resolves against `path` here, unlike the
