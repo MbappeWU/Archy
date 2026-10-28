@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -65,6 +66,10 @@ def _internal_graph(root: Path):
     external = {n for n, d in g.nodes(data=True) if d.get("external")}
     g.remove_nodes_from(external)
     return g
+
+
+def _list_tools(server):
+    return asyncio.run(server.list_tools())
 
 
 @pytest.fixture
@@ -129,7 +134,7 @@ def test_check_passed_respects_the_layer_presence_floor(tmp_path: Path):
 
 def test_create_server_registers_expected_tools():
     server = create_server()
-    tools = asyncio.run(server.list_tools())
+    tools = _list_tools(server)
     names = {t.name for t in tools}
     # The tool set is pinned exactly: adding or removing a tool without a
     # deliberate decision fails here. Folded tools live behind mode/view/param
@@ -151,7 +156,7 @@ def test_create_server_registers_expected_tools():
         # agent stops re-deriving conventions by reading source.
         "archy_conventions",
         # `archy_module_view` is the same census as a LOOKUP on one module,
-        # module, complete and unranked. Kept a separate tool rather than a
+        # complete and unranked. Kept a separate tool rather than a
         # parameter on `archy_conventions` because a union return type makes
         # FastMCP wrap every payload under a `result` key, which would change
         # the released tool's wire format for consumers that never asked for
@@ -170,7 +175,7 @@ def test_all_tools_declare_read_only_annotations_except_snapshot():
     # .archy/baseline.json, and an auto-approved overwrite is how a new cycle
     # would get grandfathered past a baseline gate (#521).
     server = create_server()
-    tools = asyncio.run(server.list_tools())
+    tools = _list_tools(server)
     assert tools, "expected registered tools"
     names = {tool.name for tool in tools}
     assert "archy_snapshot" in names
@@ -192,7 +197,7 @@ def test_all_tools_declare_human_friendly_title():
     # programmatic id. Assert every tool sets a non-empty title distinct from
     # its name.
     server = create_server()
-    tools = asyncio.run(server.list_tools())
+    tools = _list_tools(server)
     for tool in tools:
         assert tool.title, f"{tool.name} has no display title"
         assert tool.title != tool.name, f"{tool.name} title duplicates the name"
@@ -236,7 +241,7 @@ def test_all_tools_declare_output_schema():
     # object (sequence/union returns are wrapped under a `result` key to honor
     # this -- see the module docstring).
     server = create_server()
-    tools = asyncio.run(server.list_tools())
+    tools = _list_tools(server)
     for tool in tools:
         schema = _output_schema(tool)
         assert schema is not None, f"{tool.name} has no outputSchema"
@@ -1246,7 +1251,7 @@ def test_run_simulate_parses_from_alias(acyclic_project: Path):
 
 def test_simulate_tool_input_schema_uses_from_to_aliases():
     server = create_server()
-    tools = asyncio.run(server.list_tools())
+    tools = _list_tools(server)
     tool = next(t for t in tools if t.name == "archy_simulate")
     edge_spec = tool.model_dump(by_alias=True)["inputSchema"]["$defs"]["EdgeSpec"]["properties"]
     # The wire contract the agent sees must be {from, to}, not {from_, to}.
@@ -2093,8 +2098,6 @@ def test_behavioral_lens_since_propagates_to_git_churn(tmp_path: Path):
     # silently dropped. Regression guard: if someone refactored the behavioral
     # lens and forgot to forward `since`, every other test in this file would
     # still pass.
-    import os
-
     repo = tmp_path
     _init_git_repo(repo)
     pkg = repo / "pkg"
