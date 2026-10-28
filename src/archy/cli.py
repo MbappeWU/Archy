@@ -1005,8 +1005,9 @@ def what_to_refactor_next(
     is_flag=True,
     default=False,
     help=(
-        "Write only the findings (cycles, violations, module list), sorted, with no "
-        "score or line numbers: the form to commit as the `diff --strict` baseline."
+        "Write only the findings (cycles, violations, module list, rules fingerprint), "
+        "sorted, with no score or line numbers: the form to commit as the "
+        "`diff --strict` baseline."
     ),
 )
 def snapshot(path: Path, out_path: Path | None, findings_only: bool) -> None:
@@ -1051,8 +1052,10 @@ def snapshot(path: Path, out_path: Path | None, findings_only: bool) -> None:
     is_flag=True,
     default=False,
     help=(
-        "Exit 1 on a cycle or layer violation the baseline does not carry; never on "
-        "score. Requires --baseline: a committed file, never .archy/baseline.json."
+        "Exit 1 on a cycle or layer violation the baseline does not carry, or when "
+        "archy.yaml removes or narrows a rule the baseline fingerprint records. "
+        "Never on score. Requires --baseline: a committed file, never "
+        ".archy/baseline.json."
     ),
 )
 def diff(path: Path, baseline_path: Path | None, fmt: str, top_n: int, strict: bool) -> None:
