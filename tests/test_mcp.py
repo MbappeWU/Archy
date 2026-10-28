@@ -323,6 +323,7 @@ def test_output_schema_advertises_every_computed_field():
 
     assert ("Impact", "empty_caveat") in seen
     assert ("Affected", "empty_caveat") in seen
+    assert ("Affected", "deleted_reason") in seen
     assert ("StrictVerdict", "passed") in seen
     assert ("StrictVerdict", "reason") in seen
     assert ("ConventionsReport", "gate_modules") in seen
