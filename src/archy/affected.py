@@ -30,6 +30,10 @@ from archy.impact import STATIC_ONLY_CAVEAT, _index_by_path
 
 DEFAULT_DEPTH = 5
 
+DELETED_OR_RENAMED_REASON = (
+    "deleted or renamed; archy scans the current tree, so its dependents are not selected"
+)
+
 # Auto-detected test conventions. A node is treated as a test if its
 # path (relative to project root, POSIX) matches any of these, *or* any
 # path segment equals "tests". Conventions chosen to match what pytest
@@ -49,6 +53,7 @@ class Affected(BaseModel):
 
     changed: tuple[str, ...]
     unresolved: tuple[str, ...]
+    deleted: tuple[str, ...]
     impacted_modules: tuple[str, ...]
     impacted_tests: tuple[str, ...]
     depth: int
@@ -61,6 +66,13 @@ class Affected(BaseModel):
     def empty_caveat(self) -> str | None:
         if self.changed and not self.impacted_tests:
             return STATIC_ONLY_CAVEAT
+        return None
+
+    @computed_field
+    @property
+    def deleted_reason(self) -> str | None:
+        if self.deleted:
+            return DELETED_OR_RENAMED_REASON
         return None
 
 
@@ -93,11 +105,15 @@ def find_affected(
 
     changed: set[str] = set()
     unresolved: list[str] = []
+    deleted: list[str] = []
     for f in files:
         resolved = f.resolve()
         qualname = path_to_qualname.get(resolved)
         if qualname is None:
-            unresolved.append(str(f))
+            if _is_deleted_or_renamed(resolved, project_root):
+                deleted.append(str(f))
+            else:
+                unresolved.append(str(f))
         else:
             changed.add(qualname)
 
@@ -118,11 +134,27 @@ def find_affected(
     return Affected(
         changed=tuple(sorted(changed)),
         unresolved=tuple(sorted(unresolved)),
+        deleted=tuple(sorted(deleted)),
         impacted_modules=tuple(sorted(modules)),
         impacted_tests=tuple(sorted(tests)),
         depth=depth,
         test_filter=test_filter,
     )
+
+
+def _is_deleted_or_renamed(path: Path, project_root: Path) -> bool:
+    """A project `.py` the scan could not have read.
+
+    `resolve` follows parents that still exist when the file itself is gone.
+    A file that is present was visible to the scan, so it stays unresolved
+    even when it is not a module.
+    """
+    if path.suffix != ".py":
+        return False
+    resolved = path.resolve()
+    if resolved.exists():
+        return False
+    return _rel_to_root(resolved, project_root.resolve()) is not None
 
 
 def _bounded_ancestors(graph: nx.DiGraph, sources: set[str], *, depth: int) -> set[str]:

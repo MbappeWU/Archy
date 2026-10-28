@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 import archy
+from archy.affected import DELETED_OR_RENAMED_REASON
 from archy.mcp_compat import sdk_major
 
 mcp_client = pytest.importorskip("mcp.client.stdio", reason="stdio client not available")
@@ -231,3 +232,32 @@ def test_empty_impact_caveat_reaches_the_wire(project: Path):
     payload = result["structuredContent"]["result"]
     assert payload["impacted"] == []  # fixture reaches the branch
     assert "importlib.import_module" in payload["empty_caveat"]
+
+
+def test_deleted_py_reason_reaches_the_wire(tmp_path: Path):
+    """`deleted_reason` is a computed field, so it survives `model_dump()` to the agent."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    module = pkg / "a.py"
+    module.write_text("x = 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "__init__.py").write_text("")
+    (tests / "test_a.py").write_text("from pkg.a import x\n")
+    module.unlink()
+    assert not module.exists()
+
+    result = _wire(
+        _run(
+            lambda s: s.call_tool(
+                "archy_impact",
+                {"path": str(tmp_path), "files": ["pkg/a.py"], "mode": "affected"},
+            )
+        )
+    )
+    payload = result["structuredContent"]["result"]
+    assert payload["deleted"] == [str(module)]
+    assert payload["unresolved"] == []
+    assert payload["deleted_reason"] == DELETED_OR_RENAMED_REASON
+    assert payload["impacted_tests"] == []

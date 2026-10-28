@@ -24,7 +24,7 @@ import networkx as nx
 from pydantic import BaseModel, ConfigDict
 
 from archy import __version__
-from archy.affected import DEFAULT_DEPTH, Affected, find_affected
+from archy.affected import DEFAULT_DEPTH, DELETED_OR_RENAMED_REASON, Affected, find_affected
 from archy.contracts import (
     ContractsConfigError,
     ContractsNotAvailable,
@@ -664,6 +664,8 @@ def affected(
     elif quiet:
         for test_path in _affected_test_paths(g, result):
             click.echo(test_path)
+        for line in _deleted_lines(result.deleted):
+            click.echo(line, err=True)
     else:
         click.echo(_affected_to_text(result))
 
@@ -2995,12 +2997,24 @@ def _affected_to_dict(result: Affected) -> dict:
     return {
         "changed": list(result.changed),
         "unresolved": list(result.unresolved),
+        "deleted": list(result.deleted),
+        "deleted_reason": result.deleted_reason,
         "impacted_modules": list(result.impacted_modules),
         "impacted_tests": list(result.impacted_tests),
         "depth": result.depth,
         "test_filter": result.test_filter,
         "empty_caveat": result.empty_caveat,
     }
+
+
+def _deleted_lines(deleted: Sequence[str]) -> list[str]:
+    if not deleted:
+        return []
+    head, _, tail = DELETED_OR_RENAMED_REASON.partition("; ")
+    return [
+        f"# {len(deleted)} {head} .py file(s); {tail}:",
+        *(f"  ? {path}" for path in deleted),
+    ]
 
 
 def _unresolved_and_changed_lines(unresolved: Sequence[str], changed: Sequence[str]) -> list[str]:
@@ -3028,6 +3042,7 @@ def _affected_to_text(result: Affected) -> str:
     ]
     if result.test_filter:
         lines.append(f"# test filter: {result.test_filter}")
+    lines.extend(_deleted_lines(result.deleted))
     lines.extend(_unresolved_and_changed_lines(result.unresolved, result.changed))
     if result.impacted_tests:
         lines.append("")

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from archy.affected import _compile_glob, find_affected
+from archy.affected import DELETED_OR_RENAMED_REASON, _compile_glob, find_affected
 from archy.graph import build_graph
 
 # Setup pattern inlines `_make_project` + `build_graph` per test, matching
@@ -130,13 +131,126 @@ def test_affected_unresolved_files_reported(tmp_path: Path):
     project = _make_project(tmp_path)
     g = build_graph(project)
 
-    bogus = project / "app" / "libs" / "nonexistent.py"
-    result = find_affected(g, [bogus], project_root=project)
+    missing = project / "notes.md"
+    assert not missing.exists()
+    missing_result = find_affected(g, [missing], project_root=project)
+    assert missing_result.changed == ()
+    assert missing_result.impacted_modules == ()
+    assert missing_result.impacted_tests == ()
+    assert missing_result.unresolved == (str(missing),)
+    assert missing_result.deleted == ()
+    assert missing_result.deleted_reason is None
 
-    assert result.changed == ()
-    assert result.impacted_modules == ()
+    present = project / "README.md"
+    present.write_text("not python\n")
+    assert present.is_file()
+    present_result = find_affected(g, [present], project_root=project)
+    assert present_result.unresolved == (str(present),)
+    assert present_result.deleted == ()
+    assert present_result.model_dump()["deleted_reason"] is None
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _repo_with_imported_module(tmp_path: Path) -> tuple[Path, Path]:
+    """Commit `pkg/a.py` imported by `tests/test_a.py`, then return both paths."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@t.t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "commit.gpgsign", "false")
+    pkg = repo / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    module = pkg / "a.py"
+    module.write_text("x = 1\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "__init__.py").write_text("")
+    (tests / "test_a.py").write_text("from pkg.a import x\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "init")
+    return repo, module
+
+
+def test_deleted_in_project_py_is_not_unresolved(tmp_path: Path):
+    repo, module = _repo_with_imported_module(tmp_path)
+    present = find_affected(build_graph(repo), [module], project_root=repo)
+    assert "tests.test_a" in present.impacted_tests  # fixture reaches the importer
+
+    module.unlink()
+    assert not module.exists()
+    result = find_affected(build_graph(repo), [module], project_root=repo)
+
+    assert result.deleted == (str(module),)
+    assert result.unresolved == ()
     assert result.impacted_tests == ()
-    assert len(result.unresolved) == 1
+    assert result.deleted_reason == DELETED_OR_RENAMED_REASON
+    dumped = result.model_dump()
+    assert dumped["deleted"] == (str(module),)
+    assert dumped["deleted_reason"] == DELETED_OR_RENAMED_REASON
+    assert dumped["unresolved"] == ()
+
+
+def test_renamed_py_old_path_is_deleted_not_unresolved(tmp_path: Path):
+    repo, module = _repo_with_imported_module(tmp_path)
+    renamed = module.with_name("b.py")
+    module.rename(renamed)
+    assert not module.exists()
+    assert renamed.is_file()
+
+    result = find_affected(build_graph(repo), [module], project_root=repo)
+
+    assert result.deleted == (str(module),)
+    assert result.unresolved == ()
+    assert result.deleted_reason == DELETED_OR_RENAMED_REASON
+
+
+def test_present_py_outside_the_graph_stays_unresolved(tmp_path: Path):
+    project = _make_project(tmp_path)
+    # `venv` is ignored, so a file there is on disk and still not a module.
+    script = project / "venv" / "helper.py"
+    script.parent.mkdir()
+    script.write_text("print(1)\n")
+    assert script.is_file()
+    result = find_affected(build_graph(project), [script], project_root=project)
+
+    assert result.unresolved == (str(script),)
+    assert result.deleted == ()
+    assert result.deleted_reason is None
+
+
+def test_missing_py_outside_the_project_stays_unresolved(tmp_path: Path):
+    project = tmp_path / "proj"
+    project.mkdir()
+    project = _make_project(project)
+    outside = tmp_path / "gone.py"
+    assert not outside.exists()
+    result = find_affected(build_graph(project), [outside], project_root=project)
+
+    assert result.unresolved == (str(outside),)
+    assert result.deleted == ()
+    assert result.deleted_reason is None
+
+
+def test_deleted_paths_are_sorted(tmp_path: Path):
+    project = _make_project(tmp_path)
+    later = project / "app" / "z.py"
+    earlier = project / "app" / "a.py"
+    assert not later.exists()
+    assert not earlier.exists()
+    result = find_affected(build_graph(project), [later, earlier], project_root=project)
+
+    assert result.deleted == (str(earlier), str(later))
+    assert result.unresolved == ()
 
 
 def test_affected_outputs_sorted(tmp_path: Path):

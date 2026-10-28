@@ -9,6 +9,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from archy.affected import DELETED_OR_RENAMED_REASON
 from archy.cli import (
     _coupling_to_text,
     _diff_to_text,
@@ -1078,6 +1079,73 @@ def _make_app_with_core_module(tmp_path: Path) -> Path:
     (pkg / "__init__.py").write_text("")
     (pkg / "core.py").write_text("")
     return pkg
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _repo_with_deleted_module(tmp_path: Path) -> Path:
+    """A committed `pkg/a.py` imported by a test, then removed from the worktree."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@t.t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "commit.gpgsign", "false")
+    pkg = repo / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "a.py").write_text("x = 1\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "__init__.py").write_text("")
+    (tests / "test_a.py").write_text("from pkg.a import x\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "init")
+    (pkg / "a.py").unlink()
+    assert not (pkg / "a.py").exists()
+    return repo
+
+
+_DELETED_NOTE = (
+    "deleted or renamed .py file(s); "
+    "archy scans the current tree, so its dependents are not selected:"
+)
+
+
+def test_affected_text_names_a_deleted_py(tmp_path: Path):
+    repo = _repo_with_deleted_module(tmp_path)
+    result = CliRunner().invoke(main, ["affected", str(repo), "pkg/a.py"])
+    assert result.exit_code == 0, result.output
+    assert _DELETED_NOTE in result.stdout
+    assert "pkg/a.py" in result.stdout
+    assert "non-Python, excluded, or outside any package" not in result.stdout
+
+
+def test_affected_quiet_reports_deleted_py_on_stderr(tmp_path: Path):
+    repo = _repo_with_deleted_module(tmp_path)
+    result = CliRunner().invoke(main, ["affected", str(repo), "--stdin", "-q"], input="pkg/a.py\n")
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert _DELETED_NOTE in result.stderr
+    assert "pkg/a.py" in result.stderr
+    assert "non-Python, excluded, or outside any package" not in result.stderr
+
+
+def test_affected_json_carries_deleted_reason(tmp_path: Path):
+    repo = _repo_with_deleted_module(tmp_path)
+    result = CliRunner().invoke(main, ["affected", str(repo), "pkg/a.py", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["deleted"] == [str(repo / "pkg" / "a.py")]
+    assert payload["deleted_reason"] == DELETED_OR_RENAMED_REASON
+    assert payload["unresolved"] == []
 
 
 def test_affected_quiet_emits_test_file_paths(tmp_path: Path):
