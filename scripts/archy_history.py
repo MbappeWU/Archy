@@ -29,6 +29,7 @@ Usage:
 
 archy:owns        Client, Conflict, HistoryError, Remote, append_row, commits_in,
                   fetch_all, head_commit, main, month_path, render, run, score_row
+archy:mirrored-by Client also in scripts.archy_score_delta
 """
 
 from __future__ import annotations
