@@ -36,6 +36,7 @@ from archy.mcp import (
     GraphPayload,
     GraphSummaryPayload,
     GraphTooLargePayload,
+    _advertise_serialization_output_schemas,
     _run_affected,
     _run_check,
     _run_cycles,
@@ -322,6 +323,18 @@ def test_output_schema_advertises_every_computed_field():
     assert ("ConventionsReport", "gate_modules") in seen
     assert ("LayerCoverage", "layers_present") in seen
     assert missing == []
+
+
+def test_serialization_schema_replaces_a_cached_validation_schema():
+    server = create_server()
+    tool = next(item for item in server._tool_manager.list_tools() if item.name == "archy_impact")
+    tool.__dict__["output_schema"] = {"type": "object", "properties": {}}
+    _advertise_serialization_output_schemas(server)
+    listed = next(item for item in asyncio.run(server.list_tools()) if item.name == "archy_impact")
+    schema = _output_schema(listed)
+    assert schema is not None
+    assert "empty_caveat" in _schema_properties_named(schema, "Impact")
+
 
 @pytest.mark.parametrize(
     # One case per wrapping rule the structured-output contract has to honor.

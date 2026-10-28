@@ -31,11 +31,14 @@ agent calling these tools.
 
 The SDK derives an `outputSchema` (JSON Schema) from each tool's return
 annotation and attaches it to the `tools/list` entry, so every archy tool
-declares its result shape up front. Each `tools/call` then returns BOTH a
+declares its result shape up front. That derivation is validation mode,
+which omits `@computed_field`. `create_server` rewrites each schema in
+serialization mode after registration so the advertised shape matches
+`model_dump()`. Each `tools/call` then returns BOTH a
 machine-readable `structuredContent` (the JSON object, validated against
 that schema) AND a `TextContent` block carrying the same JSON serialized,
-which clients may prefer for token-efficient agent UX. archy gets this for
-free from the SDK; no per-tool opt-in is needed.
+which clients may prefer for token-efficient agent UX. No per-tool opt-in
+is needed.
 
 Two wrapping rules worth knowing:
 
@@ -107,7 +110,7 @@ from pathlib import Path
 from typing import TypeVar, cast
 
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from archy import __version__
 from archy.affected import DEFAULT_DEPTH, Affected, find_affected
@@ -680,6 +683,21 @@ class DuplicatesPayload(BaseModel):
     note: str | None
 
 
+def _advertise_serialization_output_schemas(server: Server) -> None:
+    """The SDK builds that schema with no `mode`, which is validation mode and
+    omits `@computed_field`. The payload a client receives is `model_dump()`,
+    which includes those fields.
+    """
+    for tool in server._tool_manager.list_tools():
+        metadata = tool.fn_metadata
+        model = metadata.output_model
+        if model is None or metadata.output_schema is None:
+            continue
+        metadata.output_schema = TypeAdapter(model).json_schema(mode="serialization")
+        # cached_property. A prior read would keep the validation-mode schema.
+        tool.__dict__.pop("output_schema", None)
+
+
 def create_server() -> Server:
     # `make_server`, not `Server(...)`: the constructor is the one API surface
     # the two SDK majors disagree about, and getting it wrong makes the
@@ -687,6 +705,7 @@ def create_server() -> Server:
     server: Server = make_server("archy", __version__)
     _register_tools(server)
     _register_prompts(server)
+    _advertise_serialization_output_schemas(server)
     return server
 
 
