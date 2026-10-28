@@ -17,8 +17,10 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from typing import Annotated, cast, get_args, get_origin, get_type_hints
 
 import pytest
+from pydantic import BaseModel
 
 from archy.diff import DiffReport, take_snapshot, write_snapshot
 from archy.dsm import DSM, DSMSummary
@@ -239,6 +241,87 @@ def test_all_tools_declare_output_schema():
         assert schema is not None, f"{tool.name} has no outputSchema"
         assert schema.get("type") == "object", f"{tool.name} outputSchema is not an object"
 
+
+def _return_models(fn) -> set[type[BaseModel]]:
+    found: set[type[BaseModel]] = set()
+
+    def walk(tp: object) -> None:
+        if tp is None or tp is type(None):
+            return
+        origin = get_origin(tp)
+        if origin is Annotated:
+            walk(get_args(tp)[0])
+            return
+        if origin is not None:
+            for arg in get_args(tp):
+                walk(arg)
+            return
+        if isinstance(tp, type) and issubclass(tp, BaseModel):
+            if tp in found:
+                return
+            found.add(tp)
+            for field in tp.model_fields.values():
+                walk(field.annotation)
+
+    walk(get_type_hints(fn).get("return"))
+    return found
+
+
+def _as_object_dict(node: object) -> dict[str, object] | None:
+    if isinstance(node, dict):
+        return cast("dict[str, object]", node)
+    return None
+
+
+def _schema_properties_named(schema: dict[str, object], model_name: str) -> set[str]:
+    """Property names of every schema object titled or `$defs`-keyed as `model_name`."""
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        mapping = _as_object_dict(node)
+        if mapping is None:
+            if isinstance(node, list):
+                for value in node:
+                    walk(value)
+            return
+        defs = _as_object_dict(mapping.get("$defs"))
+        if defs is not None:
+            sub = _as_object_dict(defs.get(model_name))
+            props = _as_object_dict(None if sub is None else sub.get("properties"))
+            if props is not None:
+                found.update(props)
+        titled = _as_object_dict(mapping.get("properties"))
+        if mapping.get("title") == model_name and titled is not None:
+            found.update(titled)
+        for value in mapping.values():
+            walk(value)
+
+    walk(schema)
+    return found
+
+
+def test_output_schema_advertises_every_computed_field():
+    server = create_server()
+    schemas = {tool.name: _output_schema(tool) for tool in asyncio.run(server.list_tools())}
+    seen: set[tuple[str, str]] = set()
+    missing: list[str] = []
+    for tool in server._tool_manager.list_tools():
+        schema = schemas[tool.name]
+        assert schema is not None, tool.name
+        for model in _return_models(tool.fn):
+            props = _schema_properties_named(schema, model.__name__)
+            for field_name in model.model_computed_fields:
+                seen.add((model.__name__, field_name))
+                if field_name not in props:
+                    missing.append(f"{tool.name} {model.__name__}.{field_name}")
+
+    assert ("Impact", "empty_caveat") in seen
+    assert ("Affected", "empty_caveat") in seen
+    assert ("StrictVerdict", "passed") in seen
+    assert ("StrictVerdict", "reason") in seen
+    assert ("ConventionsReport", "gate_modules") in seen
+    assert ("LayerCoverage", "layers_present") in seen
+    assert missing == []
 
 @pytest.mark.parametrize(
     # One case per wrapping rule the structured-output contract has to honor.
