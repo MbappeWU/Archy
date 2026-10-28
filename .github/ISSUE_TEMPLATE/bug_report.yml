@@ -1,0 +1,67 @@
+name: Bug report
+description: archy crashed, gave a wrong answer, or reported a clean result it should not have
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The most useful reports include a layout small enough to paste. A wrong "clean" result (no cycles, no violations, a perfect score) matters as much as a crash, so please say so below if that is what you saw.
+  - type: input
+    id: version
+    attributes:
+      label: archy version
+      description: Output of `archy --version`.
+      placeholder: "archy, version 0.50.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did you run it?
+      options:
+        - CLI
+        - MCP tool (inside an agent)
+        - GitHub Action
+        - archy install / uninstall
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or tool call
+      description: The exact command, or the MCP tool name and arguments.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Paste the output. For a crash, include the full traceback.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: checkboxes
+    id: false-green
+    attributes:
+      label: Kind of wrong answer
+      options:
+        - label: archy reported success (clean, passing, or a perfect score) when it should not have
+  - type: textarea
+    id: layout
+    attributes:
+      label: Minimal layout and config
+      description: A file tree and the contents of any `archy.yaml` that reproduce it. Three or four files is usually enough.
+      render: text
+  - type: input
+    id: environment
+    attributes:
+      label: Python version and OS
+      placeholder: "Python 3.12, macOS 14"

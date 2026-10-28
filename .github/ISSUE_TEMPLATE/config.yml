@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/hslee16/Archy/discussions
+    about: How do I configure layers, wire archy into my agent, or read a result? Ask in Discussions.
+  - name: Security vulnerability
+    url: https://github.com/hslee16/archy/security/advisories/new
+    about: Please report security issues privately, not as a public issue. See SECURITY.md.

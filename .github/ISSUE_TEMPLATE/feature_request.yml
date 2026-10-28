@@ -1,0 +1,40 @@
+name: Feature or change proposal
+description: Suggest a new capability, option, or behaviour change
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        archy is deliberately small, and several ideas have been measured and retired (see [docs/WHAT_DIDNT_WORK.md](https://github.com/hslee16/Archy/blob/main/docs/WHAT_DIDNT_WORK.md)). A proposal that answers the questions below is much easier to accept. For a large change, please open this issue before writing a PR.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do, and what happens today?
+      description: Describe the situation, not the solution. A concrete example repo or command is ideal.
+    validations:
+      required: true
+  - type: textarea
+    id: action
+    attributes:
+      label: What would you or your agent do differently because of this?
+      description: A different action, not a different number on a dashboard. If the honest answer is "read a nicer report", say so.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What the command, flag, or output would look like.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: How often does this come up? A link to a repo, a paper, or another tool that does it is enough.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched open and closed issues for something similar
+          required: true
+        - label: I read docs/WHAT_DIDNT_WORK.md and this is not something it already rules out
