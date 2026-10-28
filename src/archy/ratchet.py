@@ -1,4 +1,5 @@
-"""The `archy diff --strict` verdict: no new cycles, no new layer violations.
+"""The `archy diff --strict` verdict: no new cycles, no new layer violations,
+and no weakened rule in archy.yaml.
 
 A ratchet for codebases that already carry findings. `archy cycles --strict`
 fails on day one for most existing projects (25 of 28 bench graphs have a
@@ -26,8 +27,18 @@ guessed.
 **What counts as a new violation.** A forbid-rule violation whose
 `(from_layer, to_layer, source, target)` is not in the baseline.
 
-archy:owns        StrictEdge, StrictFinding, StrictVerdict, evaluate_strict,
-                  module_paths_for
+**What counts as a weakened rule (#585).** Findings are computed from the
+archy.yaml that is on disk now, so deleting `forbid` or excluding the
+package that imports across it makes a violation disappear. A findings-only
+baseline records a `rules` fingerprint. `strict_verdict` fails when a forbid,
+layer, required contract, or root from that fingerprint is gone or weaker,
+or when an `exclude` entry was added. A new rule, or a wider layer or
+source pattern, does not fail. A baseline written before `rules` existed
+skips this comparison and says how to regenerate one. The cycle and
+violation checks still run.
+
+archy:owns        RulesFingerprint, StrictEdge, StrictFinding, StrictVerdict,
+                  evaluate_strict, module_paths_for, weakened_rules
 """
 
 from __future__ import annotations
@@ -38,7 +49,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, computed_field
 
 from archy.cycles import Cycle
-from archy.layers import Violation
+from archy.layers import ENTRYPOINTS_SOURCE, Violation
 
 # A new tangle can carry many edges; the reason lists this many, then a count.
 _MAX_EDGES_SHOWN = 10
@@ -57,11 +68,11 @@ class StrictEdge(BaseModel):
 
 
 class StrictFinding(BaseModel):
-    """A cycle or violation the baseline does not carry."""
+    """A cycle, violation, or weakened rule the baseline does not allow."""
 
     model_config = ConfigDict(frozen=True)
 
-    kind: str  # "cycle" or "violation"
+    kind: str  # "cycle", "violation", or "rule"
     modules: tuple[str, ...]
     # For a cycle: its edges that no baseline cycle has (the ones that closed
     # it). For a violation: the forbidden edge itself.
@@ -82,6 +93,10 @@ class StrictVerdict(BaseModel):
     # Set when the baseline cannot support a verdict at all. A refused verdict
     # fails: a gate that cannot evaluate must not read as clean.
     refused: str | None = None
+    # Set when the baseline predates the rules fingerprint. Not a failure.
+    # The cycle and violation ratchet still runs; this only says how to record
+    # rules so a later config edit cannot hide a finding.
+    rules_hint: str | None = None
 
     @computed_field
     @property
@@ -98,10 +113,14 @@ class StrictVerdict(BaseModel):
             f"carried from {self.baseline}"
         )
         if not self.findings:
-            return f"no new cycles or layer violations; {carried}"
-        lines = [f"{len(self.findings)} new finding(s); {carried}:"]
-        lines.extend(f"  {finding.detail}" for finding in self.findings)
-        return "\n".join(lines)
+            text = f"no new cycles or layer violations; {carried}"
+        else:
+            lines = [f"{len(self.findings)} new finding(s); {carried}:"]
+            lines.extend(f"  {finding.detail}" for finding in self.findings)
+            text = "\n".join(lines)
+        if self.rules_hint:
+            return f"{text}\n{self.rules_hint}"
+        return text
 
 
 def evaluate_strict(
@@ -279,6 +298,161 @@ def _locations(path: str | None, lines: tuple[int, ...]) -> tuple[str, ...]:
 
 def _violation_key(v: Violation) -> tuple[str, str, str, str]:
     return (v.rule.from_layer, v.rule.to_layer, v.source, v.target)
+
+
+class RulesFingerprint(BaseModel):
+    """Canonical archy.yaml rules a findings-only baseline commits.
+
+    Lists are sorted and de-duplicated so two equivalent configs write the
+    same bytes. `required` entries are `(source, must_reach, within)` and
+    omit `reason`, which does not change what the rule covers.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    forbid: tuple[tuple[str, str], ...] = ()
+    layers: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    required: tuple[tuple[str, str, str | None], ...] = ()
+    exclude: tuple[str, ...] = ()
+    roots: tuple[str, ...] = ()
+
+    @classmethod
+    def canonical(
+        cls,
+        *,
+        forbid: Iterable[tuple[str, str]] = (),
+        layers: Iterable[tuple[str, Iterable[str]]] = (),
+        required: Iterable[tuple[str, str, str | None]] = (),
+        exclude: Iterable[str] = (),
+        roots: Iterable[str] = (),
+    ) -> RulesFingerprint:
+        merged: dict[str, set[str]] = {}
+        for name, patterns in layers:
+            merged.setdefault(name, set()).update(patterns)
+        return cls(
+            forbid=tuple(sorted(set(forbid))),
+            layers=tuple((name, tuple(sorted(pats))) for name, pats in sorted(merged.items())),
+            required=tuple(sorted(set(required), key=_required_key)),
+            exclude=tuple(sorted(set(exclude))),
+            roots=tuple(sorted(set(roots))),
+        )
+
+
+def weakened_rules(
+    baseline: RulesFingerprint, current: RulesFingerprint, *, since: str
+) -> tuple[str, ...]:
+    """Rules `current` dropped or made weaker than `baseline`.
+
+    An added forbid, layer, required contract, or root is not a weakening.
+    A wider layer pattern or required `source` is not one either. A wider
+    `must_reach` is, because more modules then count as satisfying it. An
+    added `exclude` entry is too, because it drops directories out of the scan.
+    """
+    notes: list[str] = []
+    current_forbid = set(current.forbid)
+    for src, dst in baseline.forbid:
+        if (src, dst) not in current_forbid:
+            notes.append(f"forbid {src} -> {dst} removed since {since}")
+    current_layers = dict(current.layers)
+    for name, patterns in baseline.layers:
+        if name not in current_layers:
+            notes.append(f"layer {name} removed since {since}")
+            continue
+        for pattern in patterns:
+            if not any(_pattern_covers(wider, pattern) for wider in current_layers[name]):
+                notes.append(f"layer {name} pattern {pattern} narrowed since {since}")
+    current_required = current.required
+    for contract in baseline.required:
+        if any(_required_covers(other, contract) for other in current_required):
+            continue
+        source, must, within = contract
+        scope = f" within {within}" if within is not None else ""
+        notes.append(f"required {source}{scope} must reach {must} removed since {since}")
+    baseline_exclude = set(baseline.exclude)
+    for name in current.exclude:
+        if name not in baseline_exclude:
+            notes.append(f"exclude {name} added since {since}")
+    current_roots = set(current.roots)
+    for name in baseline.roots:
+        if name not in current_roots:
+            notes.append(f"root {name} removed since {since}")
+    return tuple(sorted(notes))
+
+
+def _required_key(contract: tuple[str, str, str | None]) -> tuple[str, str, bool, str]:
+    source, must, within = contract
+    return (source, must, within is None, within or "")
+
+
+def _required_covers(
+    current: tuple[str, str, str | None], baseline: tuple[str, str, str | None]
+) -> bool:
+    """True when `current` obliges at least what `baseline` did.
+
+    A wider source or `within` obliges more modules. A narrower `must_reach`
+    is harder to satisfy, so it still enforces the old target.
+    """
+    c_source, c_must, c_within = current
+    b_source, b_must, b_within = baseline
+    return (
+        _source_covers(c_source, b_source)
+        and _pattern_covers(b_must, c_must)
+        and _within_covers(c_within, b_within)
+    )
+
+
+def _source_covers(wider: str, narrower: str) -> bool:
+    if wider == ENTRYPOINTS_SOURCE or narrower == ENTRYPOINTS_SOURCE:
+        return wider == narrower
+    return _pattern_covers(wider, narrower)
+
+
+def _within_covers(wider: str | None, narrower: str | None) -> bool:
+    # None means every derived entrypoint. A written `within` covers fewer.
+    if wider is None:
+        return True
+    if narrower is None:
+        return False
+    return _pattern_covers(wider, narrower)
+
+
+def _pattern_covers(wider: str, narrower: str) -> bool:
+    """True when every qualname matching `narrower` also matches `wider`.
+
+    The language is the dotted glob `load_config` accepts: a literal segment,
+    `*` for one segment, `**` for zero or more.
+    """
+    if wider == narrower:
+        return True
+    return _segments_cover(tuple(wider.split(".")), tuple(narrower.split(".")))
+
+
+def _segments_cover(wider: tuple[str, ...], narrower: tuple[str, ...]) -> bool:
+    # `**` on the wide side consumes one narrow token and stays. A narrow `**`
+    # is one token here because the wide `**` can match the whole run it
+    # stands for; the tokens after it still have to line up.
+    memo: dict[tuple[int, int], bool] = {}
+
+    def cover(i: int, j: int) -> bool:
+        key = (i, j)
+        if key in memo:
+            return memo[key]
+        if j == len(narrower):
+            result = all(part == "**" for part in wider[i:])
+        elif i == len(wider):
+            result = False
+        elif wider[i] == "**":
+            result = cover(i + 1, j) or cover(i, j + 1)
+        elif narrower[j] == "**":
+            result = False
+        elif narrower[j] == "*":
+            result = wider[i] == "*" and cover(i + 1, j + 1)
+        else:
+            result = wider[i] in ("*", narrower[j]) and cover(i + 1, j + 1)
+        memo[key] = result
+        return result
+
+    return cover(0, 0)
 
 
 def module_paths_for(graph, root: Path) -> dict[str, str]:

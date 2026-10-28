@@ -1050,8 +1050,10 @@ def _register_tools(server: Server) -> None:
             "layer violations that have been added or resolved since the "
             "baseline. Use after edits to localize regressions; see the `loop` "
             "prompt. `strict=True` with `baseline` (a committed file, relative "
-            "to `path`) adds `strict`: `passed` is false on any cycle or layer "
-            "violation that baseline does not carry, and `reason` names it."
+            "to `path`) adds `strict`. `passed` is false when a cycle or layer "
+            "violation is new, or when archy.yaml removes or narrows a rule the "
+            "baseline fingerprint records. `reason` names it. A baseline with no "
+            "fingerprint still checks cycles and violations."
         ),
     )
     def archy_diff(
