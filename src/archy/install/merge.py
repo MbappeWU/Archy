@@ -60,9 +60,12 @@ def _dump_json(obj: JsonObj) -> str:
 def _load_json_obj(existing: str | None) -> JsonObj:
     if not existing or not existing.strip():
         return {}
-    loaded = json.loads(existing)
+    try:
+        loaded = json.loads(existing)
+    except json.JSONDecodeError as exc:
+        raise InstallError(f"JSON decode error: {exc}") from exc
     if not isinstance(loaded, dict):
-        raise ValueError("expected a JSON object at the top level")
+        raise InstallError("expected a JSON object at the top level")
     return cast(JsonObj, loaded)
 
 
@@ -70,7 +73,10 @@ def _load_toml_obj(existing: str | None) -> JsonObj:
     """Parse a TOML document to a dict (empty when the file is absent/blank)."""
     if not existing or not existing.strip():
         return {}
-    return cast(JsonObj, tomllib.loads(existing))
+    try:
+        return cast(JsonObj, tomllib.loads(existing))
+    except tomllib.TOMLDecodeError as exc:
+        raise InstallError(f"TOML decode error: {exc}") from exc
 
 
 def _ensure_dict(obj: JsonObj, key: str) -> JsonObj:

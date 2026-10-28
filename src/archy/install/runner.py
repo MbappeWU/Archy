@@ -267,7 +267,14 @@ def preview_config(
     plan = plan_for(adapter, scope, project_root=project_root, seed_permissions=seed_permissions)
     previews: list[ConfigPreview] = []
     for action in plan:
-        rendered = action.render(ws.read_text(action.path))
+        existing_text = ws.read_text(action.path)
+        try:
+            rendered = action.render(existing_text)
+        except InstallError as exc:
+            msg = str(exc)
+            if str(action.path) not in msg:
+                raise InstallError(f"{action.path}: {msg}") from exc
+            raise
         # Bytes, not read_text: universal newlines would hide a CRLF rewrite.
         existing = action.path.read_bytes().decode("utf-8") if action.path.exists() else None
         previews.append(

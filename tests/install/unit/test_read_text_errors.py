@@ -46,3 +46,13 @@ def test_an_unreadable_file_names_the_path(tmp_path, monkeypatch):
 
 def test_a_missing_file_is_still_none(tmp_path):
     assert RealWriteSystem().read_text(tmp_path / "missing.md") is None
+
+
+def test_a_directory_names_the_path_and_is_refused(tmp_path):
+    path = tmp_path / "CLAUDE.md"
+    path.mkdir()
+
+    with pytest.raises(InstallError, match="is a directory") as excinfo:
+        RealWriteSystem().read_text(path)
+
+    assert str(path) in str(excinfo.value)

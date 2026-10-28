@@ -78,6 +78,26 @@ def test_json_mcp_rejects_non_dict_servers_key():
         render_json_mcp(existing)
 
 
+def test_json_mcp_rejects_non_object_top_level():
+    # #590: non-dict top level should raise InstallError, not ValueError
+    with pytest.raises(InstallError, match="expected a JSON object at the top level"):
+        render_json_mcp("[]")
+    with pytest.raises(InstallError, match="expected a JSON object at the top level"):
+        render_json_mcp("null")
+
+
+def test_json_mcp_rejects_malformed_json():
+    # #590: malformed JSON should raise InstallError with line and column
+    with pytest.raises(InstallError, match=r"JSON decode error:.*line 1 column 3"):
+        render_json_mcp("{ not json")
+
+
+def test_toml_mcp_rejects_malformed_toml():
+    # #590: malformed TOML should raise InstallError with line and column
+    with pytest.raises(InstallError, match=r"TOML decode error:.*line 1, column 3"):
+        render_toml_mcp("[[[")
+
+
 def test_claude_permissions_rejects_non_list_allow():
     # #169: normalizing a scalar `allow` to [] would drop the user's value and
     # leave uninstall unable to restore it; fail fast instead.

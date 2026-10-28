@@ -38,7 +38,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from archy.install import paths
-from archy.install.writer import WriteSystem
+from archy.install.writer import InstallError, WriteSystem
 
 # The MCP server every adapter wires in. `uvx archy mcp` runs the server over
 # stdio without a global install, matching the manual snippet in the README and
@@ -286,7 +286,14 @@ def apply_plan(plan: list[FileAction], write_system: WriteSystem) -> list[Path]:
     written: list[Path] = []
     for action in plan:
         existing = write_system.read_text(action.path)
-        write_system.write_text(action.path, action.render(existing))
+        try:
+            rendered = action.render(existing)
+        except InstallError as exc:
+            msg = str(exc)
+            if str(action.path) not in msg:
+                raise InstallError(f"{action.path}: {msg}") from exc
+            raise
+        write_system.write_text(action.path, rendered)
         written.append(action.path)
     return written
 
@@ -303,7 +310,13 @@ def apply_uninstall(plan: list[FileAction], write_system: WriteSystem) -> list[P
         existing = write_system.read_text(action.path)
         if existing is None:
             continue
-        result = action.unrender(existing)
+        try:
+            result = action.unrender(existing)
+        except InstallError as exc:
+            msg = str(exc)
+            if str(action.path) not in msg:
+                raise InstallError(f"{action.path}: {msg}") from exc
+            raise
         if result is None:
             write_system.remove(action.path)
         else:
