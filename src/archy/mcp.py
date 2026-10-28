@@ -6,7 +6,7 @@ Built on the official Python `mcp` SDK's ergonomic server class, imported via
 (`archy_score`, `archy_cycles`, `archy_check`, `archy_impact`,
 `archy_snapshot`, `archy_diff`, `archy_graph`, `archy_what_to_refactor_next`,
 `archy_dsm`, `archy_simulate`, `archy_duplicates`, `archy_conventions`,
-`archy_module_view`) so an agent
+`archy_module_view`, `archy_brief`) so an agent
 can treat archy as a structural sensor in its own feedback loop, the way
 the README pitches. Several tools carry a mode/lens/param switch that
 absorbs what used to be a separate tool: `archy_impact(mode='affected')`
@@ -92,14 +92,14 @@ The de-facto marker an agent can key on: a tier-3 "no usable result" variant is
 a payload with an `error` field and no success data. tests/test_mcp.py asserts
 tier-2 conditions surface as `isError` and tier-3 conditions return in-band.
 
-archy:owns        BriefLayer, CheckErrorPayload, CheckPayload, ContractsPayload,
-                  DSMErrorPayload, DSMTooLargePayload, DiffErrorPayload,
-                  DuplicateGroupSummary, DuplicatesPayload, ForbiddenEdge, GraphEdge,
-                  GraphNode, GraphPayload, GraphSummaryEntry, GraphSummaryPayload,
-                  GraphTooLargePayload, InvariantBrief, LoadBearingModule,
-                  RefactorPriorityEntry, RequiredReach, ScoreComponents, ScoreGate,
-                  ScorePayload, SnapshotPayload, TrendRow, TrendRowInputs,
-                  TrendRowScore, WhatToRefactorPayload, create_server
+archy:owns        BriefConventions, BriefLayer, BriefPayload, CheckErrorPayload,
+                  CheckPayload, ContractsPayload, DSMErrorPayload, DSMTooLargePayload,
+                  DiffErrorPayload, DuplicateGroupSummary, DuplicatesPayload,
+                  ForbiddenEdge, GraphEdge, GraphNode, GraphPayload, GraphSummaryEntry,
+                  GraphSummaryPayload, GraphTooLargePayload, InvariantBrief,
+                  LoadBearingModule, RefactorPriorityEntry, RequiredReach,
+                  ScoreComponents, ScoreGate, ScorePayload, SnapshotPayload, TrendRow,
+                  TrendRowInputs, TrendRowScore, WhatToRefactorPayload, create_server
 """
 
 from __future__ import annotations
@@ -180,6 +180,7 @@ from archy.hotspots import git_churn
 from archy.impact import DEFAULT_MAX_CHAINS, Impact, find_impact
 from archy.instability import compute_instability
 from archy.layers import (
+    LayerConfigError,
     LayerCoverage,
     ReachViolation,
     SdpViolation,
@@ -396,6 +397,42 @@ class CheckErrorPayload(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     error: str
+
+
+class BriefConventions(ConventionsReport):
+    """`ConventionsReport` bounded to `top_n` rows in its ranked sections.
+
+    Says how much it dropped (`totals`) rather than handing back a short list
+    that looks complete, which is what the CLI's `brief --format json` does.
+    `gates`, `errors`, `export_gaps` and `doc_gaps` are never truncated: a
+    partial inventory of "things you forgot to wire up" reads as a finished
+    checklist.
+    """
+
+    top_n: int
+    totals: dict[str, int]
+
+
+class BriefPayload(BaseModel):
+    """What to know before touching an unfamiliar repository, in one call.
+
+    Top-level field names match `archy brief --format json`, so the two surfaces
+    cannot drift apart on the handoff (#427). Nested shapes follow the MCP models,
+    as they already do between `archy check` and `archy_check`.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    conventions: BriefConventions
+    # None when there is no usable archy.yaml: brief tolerates a missing or
+    # malformed config and still reports, where `archy_check` cannot.
+    coverage: LayerCoverage | None = None
+    # Nested only when archy_brief(contracts=True) ran import-linter.
+    contracts: ContractsPayload | None = None
+    # What this run actually looked at; `passed`-style silence would hide that
+    # brief never runs the direct pass (#343).
+    transitive_checked: bool = False
+    transitive_unverified_reason: str | None = None
 
 
 class BriefLayer(BaseModel):
@@ -882,25 +919,19 @@ def _register_tools(server: Server) -> None:
             # it leaves the rules as unverified as a missing import-linter does
             # (#457). Same rule as the CLI's `_transitive_checked`, so the two
             # surfaces cannot disagree about whether a run was checked.
-            unverifiable = payload.unverifiable or 0
-            checked = payload.available and payload.error is None and unverifiable == 0
+            checked, unverifiable_reason = _contracts_verdict(payload)
             # A stale reason is worse than none. `_run_check` computed its reason
             # before contracts were attempted, so it names contracts=True -- and
             # replaying that at a caller who just passed contracts=True and
             # watched it fail sends them round a loop they have been through.
             # A non-None reason from `_run_check` is also the signal that there
             # WAS something to verify, so it gates the no-verdict branch.
-            if unverifiable:
+            if unverifiable_reason:
                 # Unlike the no-verdict case this does not depend on there
                 # having been a reason already: contracts ran and answered
                 # nothing, which is worth saying however well-governed the
                 # direct edges are.
-                reason = (
-                    f"{unverifiable} contract(s) could not have failed: their module patterns "
-                    "matched nothing, so the rule holds whatever the code does. Fix the "
-                    "patterns or drop the rule; the `contracts` field names the expressions "
-                    "that matched no module."
-                )
+                reason = unverifiable_reason
             elif checked or result.transitive_unverified_reason is None:
                 reason = None
             else:
@@ -1324,6 +1355,37 @@ def _register_tools(server: Server) -> None:
     def archy_module_view(path: str, module: str, include_tests: bool = False) -> ModuleView:
         return _run_module_view(_project_dir(path), module, include_tests=include_tests)
 
+    @server.tool(
+        name="archy_brief",
+        title="One bounded briefing before touching an unfamiliar repository",
+        annotations=_READ_ONLY_ANNOTATIONS,
+        description=(
+            "**Call once, before starting on an unfamiliar repository.** "
+            "Composes `archy_conventions` (naming, mirrored surfaces, gates, "
+            "export and doc gaps), the layer `coverage` of `archy.yaml` and, "
+            "with `contracts=True`, the transitive import-linter verdict, into "
+            "one answer to 'what do I need to know before I touch this'. "
+            "`top_n` (default 8) bounds the ranked sections and `conventions."
+            "totals` says how many were dropped; `gates`, `errors`, "
+            "`export_gaps` and `doc_gaps` are never truncated. `coverage` is "
+            "null when there is no usable archy.yaml. This tool does NOT run "
+            "the direct-edge check, so `transitive_checked=false` with a "
+            "`transitive_unverified_reason` means the `forbid` rules are "
+            "unverified, not that they hold; pass `contracts=True` to settle "
+            "it. It is ranked and truncated like `archy_conventions`, so for a "
+            "negative call `archy_module_view`. Advisory: mutates nothing."
+        ),
+    )
+    def archy_brief(
+        path: str,
+        top_n: int = 8,
+        contracts: bool = False,
+        include_tests: bool = False,
+    ) -> BriefPayload:
+        return _run_brief(
+            _project_dir(path), top_n=top_n, with_contracts=contracts, include_tests=include_tests
+        )
+
     # removed v0.41 (#267): archy_status demoted off the agent surface. Index
     # freshness is diagnostic plumbing, not a mid-task decision (every tool
     # syncs on demand, so a result is never stale); the capability now lives in
@@ -1350,6 +1412,87 @@ def _run_module_view(path: Path, module: str, *, include_tests: bool) -> ModuleV
     consumers that never asked for this feature.
     """
     return compute_module_view(path, module, **graph_kwargs(path), include_tests=include_tests)
+
+
+def _run_brief(
+    path: Path, *, top_n: int, with_contracts: bool, include_tests: bool
+) -> BriefPayload:
+    """Compose conventions, coverage and (optionally) contracts, as `archy brief` does."""
+    if top_n < 1:
+        raise ValueError(f"top_n must be >= 1; got {top_n}")
+    report = compute_conventions(path, **graph_kwargs(path), include_tests=include_tests)
+
+    coverage: LayerCoverage | None = None
+    config = None
+    config_path = discover_config(path)
+    if config_path is not None:
+        try:
+            config = load_config(config_path)
+            coverage = compute_coverage(_build_graph(path, **scan_kwargs(config)), config)
+        except LayerConfigError:
+            # A malformed archy.yaml is `archy_check`'s to report. Here it would
+            # replace the whole briefing with one error.
+            config = coverage = None
+
+    contracts = _run_contracts(path, config_filename=None) if with_contracts else None
+    checked, unverifiable_reason = (
+        _contracts_verdict(contracts) if contracts is not None else (False, None)
+    )
+
+    reason: str | None = None
+    if config is not None and coverage is not None and not checked:
+        if unverifiable_reason:
+            reason = unverifiable_reason
+        elif contracts_unverified(config, coverage, []):
+            n = len(config.forbid)
+            stem = f"{n} forbid {'rule' if n == 1 else 'rules'} declared"
+            if contracts is not None:
+                reason = (
+                    f"{stem} and still unverified: archy_brief(contracts=True) "
+                    f"produced no transitive verdict ({contracts.error})."
+                )
+            else:
+                reason = (
+                    f"{stem}, but this brief runs no direct-edge check and the layers "
+                    "govern too little of the graph to verify them; "
+                    "archy_brief(contracts=True) evaluates them transitively via import-linter."
+                )
+
+    return BriefPayload(
+        conventions=_bound_conventions(report, top_n),
+        coverage=coverage,
+        contracts=contracts,
+        transitive_checked=checked,
+        transitive_unverified_reason=reason,
+    )
+
+
+def _bound_conventions(report: ConventionsReport, top_n: int) -> BriefConventions:
+    """Truncate the ranked sections to `top_n`, recording the untruncated totals."""
+    fields = {name: getattr(report, name) for name in ConventionsReport.model_fields}
+    fields.update(
+        naming=report.naming[:top_n],
+        surfaces=report.surfaces[:top_n],
+        bases=report.bases[:top_n],
+        registries=tuple(
+            r.model_copy(update={"literal_names": r.literal_names[:6]})
+            for r in report.registries[:top_n]
+        ),
+    )
+    return BriefConventions(
+        **fields,
+        top_n=top_n,
+        totals={
+            "naming": len(report.naming),
+            "surfaces": len(report.surfaces),
+            "gates": len(report.gates),
+            "errors": len(report.errors),
+            "bases": len(report.bases),
+            "registries": len(report.registries),
+            "export_gaps": len(report.export_gaps),
+            "doc_gaps": len(report.doc_gaps),
+        },
+    )
 
 
 def _run_score(
@@ -1489,6 +1632,29 @@ def _run_contracts(path: Path, *, config_filename: Path | None) -> ContractsPayl
         import_count=result.import_count,
         contracts=result.contracts,
     )
+
+
+def _contracts_verdict(contracts: ContractsPayload) -> tuple[bool, str | None]:
+    """`(checked, unverifiable_reason)` for a contracts run, shared by every caller.
+
+    Only a verdict counts as "checked": a missing import-linter leaves the rules
+    as unverified as not asking (#343), and so does a contract that could not
+    have failed (#457). The reason is set exactly when some contract could not
+    have failed, whatever the direct edges govern. Shared by `archy_check` and
+    `archy_brief` so the two cannot disagree about either (same rule as the
+    CLI's `_transitive_checked`).
+    """
+    unverifiable = contracts.unverifiable or 0
+    checked = contracts.available and contracts.error is None and unverifiable == 0
+    reason = (
+        f"{unverifiable} contract(s) could not have failed: their module patterns "
+        "matched nothing, so the rule holds whatever the code does. Fix the "
+        "patterns or drop the rule; the `contracts` field names the expressions "
+        "that matched no module."
+        if unverifiable
+        else None
+    )
+    return checked, reason
 
 
 _BRIEF_LOAD_BEARING_N = 5
