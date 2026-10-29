@@ -144,7 +144,6 @@ def find_affected(
     )
 
 
-
 def _expand_impacted_conftests(
     graph: nx.DiGraph,
     tests: set[str],

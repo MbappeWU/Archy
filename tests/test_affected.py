@@ -384,9 +384,7 @@ def _conftest_fixture_project(tmp_path: Path) -> Path:
     unit = tests / "unit"
     unit.mkdir()
     (unit / "__init__.py").write_text("")
-    (unit / "test_x.py").write_text(
-        "def test_x(built):\n    assert built == 1\n"
-    )
+    (unit / "test_x.py").write_text("def test_x(built):\n    assert built == 1\n")
     return tmp_path
 
 

@@ -1071,9 +1071,7 @@ def test_affected_json_expands_impacted_conftest(tmp_path: Path):
     )
     (tests / "test_x.py").write_text("def test_x(built):\n    assert built == 1\n")
 
-    result = CliRunner().invoke(
-        main, ["affected", str(tmp_path), "app/factory.py", "--json"]
-    )
+    result = CliRunner().invoke(main, ["affected", str(tmp_path), "app/factory.py", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert "tests.conftest" not in payload["impacted_tests"]
