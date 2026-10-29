@@ -131,6 +131,8 @@ def find_affected(
         else:
             modules.add(q)
 
+    tests, modules = _expand_impacted_conftests(graph, tests, modules, is_test)
+
     return Affected(
         changed=tuple(sorted(changed)),
         unresolved=tuple(sorted(unresolved)),
@@ -140,6 +142,56 @@ def find_affected(
         depth=depth,
         test_filter=test_filter,
     )
+
+
+def _expand_impacted_conftests(
+    graph: nx.DiGraph,
+    tests: set[str],
+    modules: set[str],
+    is_test,
+) -> tuple[set[str], set[str]]:
+    """Replace impacted ``conftest.py`` nodes with the tests they serve.
+
+    A ``conftest.py`` is classified as a test only because of its path (under
+    ``tests/`` or matching ``--filter``), or it lands in ``impacted_modules``
+    when it sits outside those conventions (e.g. a repo-root conftest). Either
+    way it is not itself a runnable test file: expand it to every
+    test-classified graph node whose path is in or below the conftest's
+    directory, then drop the conftest.
+    """
+    conftest_qs = {
+        q
+        for q in tests | modules
+        if (path := graph.nodes[q].get("path")) and Path(path).name == "conftest.py"
+    }
+    if not conftest_qs:
+        return tests, modules
+
+    tests = set(tests)
+    modules = set(modules)
+    for cq in conftest_qs:
+        cpath = Path(graph.nodes[cq]["path"]).resolve()
+        cdir = cpath.parent
+        tests.discard(cq)
+        modules.discard(cq)
+        for q, data in graph.nodes(data=True):
+            if data.get("external"):
+                continue
+            npath = data.get("path")
+            if not npath:
+                continue
+            np = Path(npath).resolve()
+            if np.name in {"conftest.py", "__init__.py"}:
+                continue
+            if not is_test(np):
+                continue
+            try:
+                np.relative_to(cdir)
+            except ValueError:
+                continue
+            tests.add(q)
+            modules.discard(q)
+    return tests, modules
 
 
 def _is_deleted_or_renamed(path: Path, project_root: Path) -> bool:

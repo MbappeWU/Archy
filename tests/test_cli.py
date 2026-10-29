@@ -1057,6 +1057,27 @@ def test_affected_classifies_tests_and_modules_json(tmp_path: Path):
     assert payload["depth"] == 5
 
 
+def test_affected_json_expands_impacted_conftest(tmp_path: Path):
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "__init__.py").write_text("")
+    (app / "factory.py").write_text("def make():\n    return 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "__init__.py").write_text("")
+    (tests / "conftest.py").write_text(
+        "import pytest\nfrom app.factory import make\n\n"
+        "@pytest.fixture\ndef built():\n    return make()\n"
+    )
+    (tests / "test_x.py").write_text("def test_x(built):\n    assert built == 1\n")
+
+    result = CliRunner().invoke(main, ["affected", str(tmp_path), "app/factory.py", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert "tests.conftest" not in payload["impacted_tests"]
+    assert "tests.test_x" in payload["impacted_tests"]
+
+
 def _make_app_with_test_module(tmp_path: Path) -> None:
     """Minimal app/core.py + tests/test_core.py importing it.
 
