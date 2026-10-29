@@ -29,6 +29,7 @@ from archy.install.base import (
     apply_uninstall,
     remove_instructions,
 )
+from archy.install.merge import denied_archy_permission_patterns
 from archy.install.registry import all_adapters, get_adapter
 from archy.install.writer import (
     DryRunWriteSystem,
@@ -60,6 +61,7 @@ class AdapterResult(BaseModel):
 
     adapter_id: str
     written: tuple[Path, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 class InstallResult(BaseModel):
@@ -71,6 +73,9 @@ class InstallResult(BaseModel):
 
     def all_paths(self) -> list[Path]:
         return [p for r in self.results for p in r.written]
+
+    def all_notes(self) -> list[str]:
+        return [n for r in self.results for n in r.notes]
 
 
 def detect_all() -> list[Detection]:
@@ -155,8 +160,22 @@ def _run_for_adapters(
             seed_permissions=seed_permissions,
             for_uninstall=for_uninstall,
         )
+        notes: list[str] = []
+        if not for_uninstall:
+            for action in plan:
+                if action.kind != "permissions":
+                    continue
+                skipped = denied_archy_permission_patterns(ws.read_text(action.path))
+                if skipped:
+                    notes.append("left denied (not added to allow): " + ", ".join(skipped))
         touched = apply_fn(plan, ws)
-        results.append(AdapterResult(adapter_id=adapter.id, written=tuple(touched)))
+        results.append(
+            AdapterResult(
+                adapter_id=adapter.id,
+                written=tuple(touched),
+                notes=tuple(notes),
+            )
+        )
     return InstallResult(results=tuple(results))
 
 

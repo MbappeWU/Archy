@@ -101,3 +101,32 @@ def test_run_uninstall_on_clean_machine_touches_nothing(simulate_os):
     assert result.all_paths() == []
     assert ws.removed == []
     assert ws.records == []
+
+
+def test_run_install_reports_denied_claude_tools(simulate_os):
+    """Install skips tools in permissions.deny and names them in result notes (#542)."""
+    import json
+
+    from archy.install.base import TOOL_NAMES, permission_patterns
+    from archy.install.registry import get_adapter
+    from archy.install.writer import RealWriteSystem
+
+    fake = simulate_os("linux")
+    denied = permission_patterns()[0]
+    assert denied.endswith(TOOL_NAMES[0])
+    settings = fake.home / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"permissions": {"deny": [denied]}}, indent=2) + "\n")
+    assert denied in json.loads(settings.read_text())["permissions"]["deny"]
+
+    result = run_install(
+        [get_adapter("claude")],
+        Scope.GLOBAL,
+        write_system=RealWriteSystem(),
+    )
+    allow = json.loads(settings.read_text())["permissions"]["allow"]
+    deny = json.loads(settings.read_text())["permissions"]["deny"]
+    assert denied in deny
+    assert denied not in allow
+    assert any(denied in note for note in result.all_notes())
+    assert any(p in allow for p in permission_patterns() if p != denied)
