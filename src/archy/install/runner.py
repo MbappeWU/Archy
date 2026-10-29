@@ -167,9 +167,7 @@ def _run_for_adapters(
                     continue
                 skipped = denied_archy_permission_patterns(ws.read_text(action.path))
                 if skipped:
-                    notes.append(
-                        "left denied (not added to allow): " + ", ".join(skipped)
-                    )
+                    notes.append("left denied (not added to allow): " + ", ".join(skipped))
         touched = apply_fn(plan, ws)
         results.append(
             AdapterResult(

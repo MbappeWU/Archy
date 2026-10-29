@@ -155,7 +155,6 @@ def render_continue_yaml(existing: str | None) -> str:
     return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
 
 
-
 def denied_archy_permission_patterns(existing: str | None) -> list[str]:
     """Return archy tool patterns the user already listed in ``permissions.deny``.
 

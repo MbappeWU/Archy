@@ -116,9 +116,7 @@ def test_run_install_reports_denied_claude_tools(simulate_os):
     assert denied.endswith(TOOL_NAMES[0])
     settings = fake.home / ".claude" / "settings.json"
     settings.parent.mkdir(parents=True)
-    settings.write_text(
-        json.dumps({"permissions": {"deny": [denied]}}, indent=2) + "\n"
-    )
+    settings.write_text(json.dumps({"permissions": {"deny": [denied]}}, indent=2) + "\n")
     assert denied in json.loads(settings.read_text())["permissions"]["deny"]
 
     result = run_install(
