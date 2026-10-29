@@ -1549,6 +1549,8 @@ def _run_score(
 
 
 def _run_cycles(path: Path, *, min_size: int, internal_only: bool) -> list[Cycle]:
+    if min_size < 1:
+        raise ValueError(f"min_size must be >= 1; got {min_size}")
     graph = _load_graph(path, internal_only=internal_only)
     return list(find_cycles(graph, min_size=min_size))
 
@@ -2096,6 +2098,8 @@ def _run_dsm(
     apply to it. The full matrix is capped at DEFAULT_MAX_DSM_CELLS cells.
     """
     _validate_response_format(response_format)
+    if focus_depth < 0:
+        raise ValueError(f"focus_depth must be >= 0; got {focus_depth}")
     graph = _load_graph(path, internal_only=False)
     current = build_dsm(
         graph,

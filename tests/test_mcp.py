@@ -767,6 +767,72 @@ def _seed_score_history(project: Path, overall: float) -> None:
     history.write_text(json.dumps(row) + "\n")
 
 
+def test_archy_cycles_rejects_min_size_below_one(acyclic_project: Path):
+    """MCP archy_cycles must reject min_size < 1 the way the CLI does.
+
+    CLI `cycles --min-size` uses `_require(min_size >= 1, ...)`. Without the
+    matching MCP guard, min_size=0 / -5 silently return the cycle list.
+    """
+    from archy.mcp_compat import ToolError
+
+    server = create_server()
+    path = str(acyclic_project)
+
+    for bad in (0, -5):
+        message = f"min_size must be >= 1; got {bad}"
+        with pytest.raises(ValueError) as caught:
+            _run_cycles(acyclic_project, min_size=bad, internal_only=True)
+        assert str(caught.value) == message
+        with pytest.raises(ToolError):
+            _call_tool(server, "archy_cycles", {"path": path, "min_size": bad})
+
+    # Boundary that must still succeed (acyclic project -> empty list).
+    assert _run_cycles(acyclic_project, min_size=1, internal_only=True) == []
+    _content, structured = _call_tool(server, "archy_cycles", {"path": path, "min_size": 1})
+    assert structured == {"result": []}
+
+
+def test_archy_dsm_rejects_negative_focus_depth(acyclic_project: Path):
+    """MCP archy_dsm must reject focus_depth < 0 the way the CLI does."""
+    from archy.mcp_compat import ToolError
+
+    server = create_server()
+    path = str(acyclic_project)
+    message = "focus_depth must be >= 0; got -1"
+    with pytest.raises(ValueError) as caught:
+        _run_dsm(
+            acyclic_project,
+            response_format="summary",
+            group_by="community",
+            weight="imports",
+            focus=None,
+            focus_depth=-1,
+            package=None,
+            baseline_path=None,
+        )
+    assert str(caught.value) == message
+    with pytest.raises(ToolError):
+        _call_tool(
+            server,
+            "archy_dsm",
+            {"path": path, "focus": "app.a", "focus_depth": -1},
+        )
+
+    # focus_depth=0 is a valid CLI bound and must still succeed.
+    summary = _run_dsm(
+        acyclic_project,
+        response_format="summary",
+        group_by="community",
+        weight="imports",
+        focus=None,
+        focus_depth=0,
+        package=None,
+        baseline_path=None,
+    )
+    assert isinstance(summary, DSMSummary)
+    assert summary.module_count >= 0
+
+
 def test_archy_score_rejects_strict_tolerance_outside_unit_interval(acyclic_project: Path):
     """`archy_score` must reject a strict_tolerance outside [0, 1].
 
