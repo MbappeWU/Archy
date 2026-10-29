@@ -2683,3 +2683,40 @@ def test_brief_rejects_a_nonsense_top_n(tmp_path: Path):
     project = _write_brief_project(tmp_path, with_config=False)
     with pytest.raises(ToolError):
         _call_tool(create_server(), "archy_brief", {"path": str(project), "top_n": 0})
+
+
+def test_impact_affected_expands_conftest(tmp_path: Path):
+    """archy_impact(mode=affected) must expand conftest.py to the tests it serves."""
+    from archy.affected import Affected
+
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "__init__.py").write_text("")
+    (app / "factory.py").write_text("def make():\n    return 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "__init__.py").write_text("")
+    (tests / "conftest.py").write_text(
+        "import pytest\nfrom app.factory import make\n\n"
+        "@pytest.fixture\ndef built():\n    return make()\n"
+    )
+    (tests / "test_x.py").write_text("def test_x(built):\n    assert built == 1\n")
+
+    result = _run_affected(tmp_path, files=[Path("app/factory.py")], depth=5, test_filter=None)
+    assert isinstance(result, Affected)
+    assert "tests.conftest" not in result.impacted_tests
+    assert "tests.test_x" in result.impacted_tests
+
+    _, structured = _call_tool(
+        create_server(),
+        "archy_impact",
+        {
+            "path": str(tmp_path),
+            "files": ["app/factory.py"],
+            "mode": "affected",
+        },
+    )
+    assert structured is not None
+    payload = structured["result"]
+    assert "tests.conftest" not in payload["impacted_tests"]
+    assert "tests.test_x" in payload["impacted_tests"]

@@ -365,3 +365,74 @@ def test_affected_without_tests_carries_static_only_caveat(tmp_path: Path):
     none = find_affected(graph, [orphan], project_root=project)
     assert none.impacted_tests == ()
     assert "importlib.import_module" in none.model_dump()["empty_caveat"]
+
+
+def _conftest_fixture_project(tmp_path: Path) -> Path:
+    """factory imported only by tests/conftest.py; test_x uses the fixture."""
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "__init__.py").write_text("")
+    (app / "factory.py").write_text("def make():\n    return 1\n")
+    (app / "core.py").write_text("x = 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "__init__.py").write_text("")
+    (tests / "conftest.py").write_text(
+        "import pytest\nfrom app.factory import make\n\n"
+        "@pytest.fixture\ndef built():\n    return make()\n"
+    )
+    unit = tests / "unit"
+    unit.mkdir()
+    (unit / "__init__.py").write_text("")
+    (unit / "test_x.py").write_text(
+        "def test_x(built):\n    assert built == 1\n"
+    )
+    return tmp_path
+
+
+def test_impacted_conftest_expands_to_tests_it_serves(tmp_path: Path):
+    project = _conftest_fixture_project(tmp_path)
+    g = build_graph(project)
+    result = find_affected(g, [project / "app" / "factory.py"], project_root=project)
+    assert "tests.conftest" not in result.impacted_tests
+    assert "tests.unit.test_x" in result.impacted_tests
+    assert "tests.conftest" not in result.impacted_modules
+    dumped = result.model_dump()
+    assert "tests.conftest" not in dumped["impacted_tests"]
+    assert "tests.unit.test_x" in dumped["impacted_tests"]
+
+
+def test_root_conftest_expands_the_same_way(tmp_path: Path):
+    project = tmp_path
+    app = project / "app"
+    app.mkdir()
+    (app / "__init__.py").write_text("")
+    (app / "factory.py").write_text("def make():\n    return 1\n")
+    (project / "conftest.py").write_text(
+        "import pytest\nfrom app.factory import make\n\n"
+        "@pytest.fixture\ndef built():\n    return make()\n"
+    )
+    tests = project / "tests"
+    tests.mkdir()
+    (tests / "__init__.py").write_text("")
+    (tests / "test_x.py").write_text("def test_x(built):\n    assert built == 1\n")
+    g = build_graph(project)
+    result = find_affected(g, [project / "app" / "factory.py"], project_root=project)
+    assert "tests.test_x" in result.impacted_tests
+    for q in (*result.impacted_tests, *result.impacted_modules):
+        path = g.nodes[q].get("path")
+        assert path is None or Path(path).name != "conftest.py"
+
+
+def test_conftest_expansion_respects_filter(tmp_path: Path):
+    project = _conftest_fixture_project(tmp_path)
+    g = build_graph(project)
+    # Only unit tests match; expansion must not add paths the filter rejects.
+    result = find_affected(
+        g,
+        [project / "app" / "factory.py"],
+        project_root=project,
+        test_filter="**/unit/test_*.py",
+    )
+    assert "tests.unit.test_x" in result.impacted_tests
+    assert "tests.conftest" not in result.impacted_tests
