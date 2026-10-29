@@ -642,6 +642,55 @@ def test_check_malformed_config_reports_error(tmp_path: Path):
     assert "ghost" in result.output
 
 
+@pytest.mark.parametrize(
+    "build_args",
+    [
+        lambda p: ["cycles", str(p)],
+        lambda p: ["graph", str(p)],
+        lambda p: ["score", str(p)],
+        lambda p: ["dsm", str(p)],
+        lambda p: ["hotspots", str(p)],
+        lambda p: ["snapshot", str(p)],
+        lambda p: ["brief", str(p)],
+        lambda p: ["coupling", str(p)],
+        lambda p: ["duplicates", str(p)],
+        lambda p: ["conventions", str(p)],
+        lambda p: ["what-to-refactor-next", str(p)],
+        lambda p: ["impact", str(p), "--file", "pkg/__init__.py"],
+        lambda p: ["simulate", str(p)],
+        lambda p: ["render", str(p), "--view", "dsm"],
+    ],
+)
+def test_malformed_archy_yaml_is_one_line_error_not_traceback(tmp_path: Path, build_args):
+    """#524: every graph-loading CLI command must ClickException a bad archy.yaml.
+
+    `check` and `contracts` already did; the rest used to dump a traceback because
+    `_load_graph` / direct `graph_kwargs` let LayerConfigError propagate.
+    """
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    yaml_path = tmp_path / "archy.yaml"
+    yaml_path.write_text("layers: [\n")
+    result = CliRunner().invoke(main, build_args(tmp_path))
+    assert result.exit_code == 1, result.output
+    assert "Traceback" not in result.output
+    assert "archy.yaml" in result.output
+
+
+def test_check_and_contracts_still_report_malformed_yaml(tmp_path: Path):
+    """#524: check/contracts keep their existing clean Error path."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (tmp_path / "archy.yaml").write_text("layers: [\n")
+    for cmd in (["check", str(tmp_path)], ["contracts", str(tmp_path)]):
+        result = CliRunner().invoke(main, cmd)
+        assert result.exit_code == 1, (cmd, result.output)
+        assert "Traceback" not in result.output
+        assert "archy.yaml" in result.output
+
+
 def test_score_text_output(tmp_path: Path):
     project = _make_acyclic_project(tmp_path)
     result = CliRunner().invoke(main, ["score", str(project)])
