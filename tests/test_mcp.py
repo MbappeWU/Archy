@@ -829,6 +829,7 @@ def test_archy_dsm_rejects_negative_focus_depth(acyclic_project: Path):
         package=None,
         baseline_path=None,
     )
+    assert isinstance(summary, DSMSummary)
     assert summary.module_count >= 0
 
 
