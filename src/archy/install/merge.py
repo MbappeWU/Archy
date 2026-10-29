@@ -166,7 +166,7 @@ def denied_archy_permission_patterns(existing: str | None) -> list[str]:
     permissions = obj.get("permissions")
     if not isinstance(permissions, dict):
         return []
-    deny = permissions.get("deny")
+    deny = cast(JsonObj, permissions).get("deny")
     if not isinstance(deny, list):
         return []
     deny_set = {p for p in deny if isinstance(p, str)}
