@@ -767,7 +767,6 @@ def _seed_score_history(project: Path, overall: float) -> None:
     history.write_text(json.dumps(row) + "\n")
 
 
-
 def test_archy_cycles_rejects_min_size_below_one(acyclic_project: Path):
     """MCP archy_cycles must reject min_size < 1 the way the CLI does.
 
@@ -789,9 +788,7 @@ def test_archy_cycles_rejects_min_size_below_one(acyclic_project: Path):
 
     # Boundary that must still succeed (acyclic project -> empty list).
     assert _run_cycles(acyclic_project, min_size=1, internal_only=True) == []
-    _content, structured = _call_tool(
-        server, "archy_cycles", {"path": path, "min_size": 1}
-    )
+    _content, structured = _call_tool(server, "archy_cycles", {"path": path, "min_size": 1})
     assert structured == {"result": []}
 
 
