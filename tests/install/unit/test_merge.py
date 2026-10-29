@@ -19,6 +19,7 @@ else:  # pragma: no cover
 
 from archy.install.base import permission_patterns
 from archy.install.merge import (
+    denied_archy_permission_patterns,
     render_claude_permissions,
     render_continue_yaml,
     render_json_mcp,
@@ -218,3 +219,36 @@ def test_strip_claude_permissions_removes_only_archy_patterns():
     allow = json.loads(strip_claude_permissions(installed))["permissions"]["allow"]
     assert allow == ["Bash(ls:*)"]
     assert not any(p in allow for p in permission_patterns())
+
+
+def test_claude_permissions_skips_tools_listed_in_deny():
+    # #542: a tool the user put in deny must stay out of allow.
+    patterns = permission_patterns()
+    assert patterns, "fixture precondition: archy exposes at least one tool"
+    denied = patterns[0]
+    existing = json.dumps({"permissions": {"deny": [denied], "allow": ["Bash(ls:*)"]}})
+    assert denied in json.loads(existing)["permissions"]["deny"]
+
+    obj = json.loads(render_claude_permissions(existing))
+    allow = obj["permissions"]["allow"]
+    deny = obj["permissions"]["deny"]
+
+    assert denied in deny
+    assert denied not in allow
+    assert "Bash(ls:*)" in allow
+    for pattern in patterns[1:]:
+        assert pattern in allow
+    assert denied_archy_permission_patterns(existing) == [denied]
+
+
+def test_strip_claude_permissions_leaves_deny_untouched():
+    patterns = permission_patterns()
+    denied = patterns[0]
+    existing = json.dumps(
+        {"permissions": {"deny": [denied, "Bash(rm:*)"], "allow": ["Bash(ls:*)"]}}
+    )
+    installed = render_claude_permissions(existing)
+    stripped = json.loads(strip_claude_permissions(installed))
+    assert stripped["permissions"]["deny"] == [denied, "Bash(rm:*)"]
+    assert denied not in stripped["permissions"]["allow"]
+    assert not any(p in stripped["permissions"]["allow"] for p in patterns)

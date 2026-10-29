@@ -245,9 +245,13 @@ def test_full_without_print_config_is_a_usage_error_and_writes_nothing(simulate_
     assert not (fake.home / ".cursor").exists()
 
 
-def test_archy_tool_names_elsewhere_do_not_hide_the_allow_entries(simulate_os):
-    """The tool names sit in `deny`, so install still adds them to `allow`.
-    A line-presence check called that "already present" and printed nothing."""
+def test_archy_tool_names_in_deny_are_not_added_to_allow(simulate_os):
+    """Tools listed in `deny` stay denied: install must not seed them into `allow` (#542).
+
+    A prior line-presence check treated deny entries as "already present in the
+    file" and hid the allow diff; the correct behavior is to leave them out of
+    allow entirely so the preview shows no `+ mcp__archy__…` for denied tools.
+    """
     fake = simulate_os("linux")
     deny = [f"mcp__archy__{name}" for name in TOOL_NAMES]
     path = fake.home / ".claude" / "settings.json"
@@ -257,7 +261,8 @@ def test_archy_tool_names_elsewhere_do_not_hide_the_allow_entries(simulate_os):
     out = _print_config()
 
     section = out.split("settings.json", 1)[1]
-    assert f'+      "mcp__archy__{TOOL_NAMES[0]}",' in section
+    for name in TOOL_NAMES:
+        assert f'+      "mcp__archy__{name}",' not in section
 
 
 def test_an_owned_file_without_markers_prints_whole_and_drops_the_old_env(simulate_os):

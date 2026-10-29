@@ -1778,6 +1778,8 @@ def install(
     click.echo(f"Wrote {len(paths_written)} file(s):")
     for path in paths_written:
         click.echo(f"  {path}")
+    for note in result.all_notes():
+        click.echo(note)
     click.echo("Restart your agent client(s) to pick up the archy MCP server.")
 
 

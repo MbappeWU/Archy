@@ -7,9 +7,10 @@ parse back (layer 4). The cardinal rule from the testing spec: no hand-coded
 JSON/TOML strings, always parse-then-reserialize, so a user's unrelated config
 survives untouched and a second run is a byte-for-byte no-op (idempotency).
 
-archy:owns        render_claude_permissions, render_continue_yaml, render_json_mcp,
-                  render_opencode_mcp, render_toml_mcp, strip_claude_permissions,
-                  strip_json_mcp, strip_opencode_mcp, strip_toml_mcp
+archy:owns        denied_archy_permission_patterns, render_claude_permissions,
+                  render_continue_yaml, render_json_mcp, render_opencode_mcp,
+                  render_toml_mcp, strip_claude_permissions, strip_json_mcp,
+                  strip_opencode_mcp, strip_toml_mcp
 archy:mirrored-by render_json_mcp -> archy.install.adapters.claude,
                   archy.install.adapters.cursor,
                   strip_json_mcp -> archy.install.adapters.claude,
@@ -154,13 +155,33 @@ def render_continue_yaml(existing: str | None) -> str:
     return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
 
 
+
+def denied_archy_permission_patterns(existing: str | None) -> list[str]:
+    """Return archy tool patterns the user already listed in ``permissions.deny``.
+
+    Used by :func:`render_claude_permissions` to keep those tools out of
+    ``allow``, and by the installer to surface a note when a tool was skipped
+    because of an existing deny (#542).
+    """
+    obj = _load_json_obj(existing)
+    permissions = obj.get("permissions")
+    if not isinstance(permissions, dict):
+        return []
+    deny = permissions.get("deny")
+    if not isinstance(deny, list):
+        return []
+    deny_set = {p for p in deny if isinstance(p, str)}
+    return [p for p in permission_patterns() if p in deny_set]
+
+
 def render_claude_permissions(existing: str | None) -> str:
     """Merge archy's tool patterns into Claude's `permissions.allow` array.
 
     Order-preserving and de-duplicating: existing entries keep their position,
-    and only archy patterns not already present are appended. The plugin
-    manifest cannot seed this (Claude Code plugin constraint), which is the gap
-    this closes.
+    and only archy patterns not already present are appended. Patterns the user
+    already listed in ``permissions.deny`` are left out of ``allow`` so install
+    does not override an explicit deny (#542). The plugin manifest cannot seed
+    this (Claude Code plugin constraint), which is the gap this closes.
     """
     obj = _load_json_obj(existing)
     perms = _ensure_dict(obj, "permissions")
@@ -179,7 +200,10 @@ def render_claude_permissions(existing: str | None) -> str:
         )
     allow_list = cast(list[object], allow)
     have = set(allow_list)
+    denied = set(denied_archy_permission_patterns(existing))
     for pattern in permission_patterns():
+        if pattern in denied:
+            continue
         if pattern not in have:
             allow_list.append(pattern)
             have.add(pattern)
