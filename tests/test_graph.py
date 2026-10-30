@@ -49,6 +49,21 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _mkpkg(parent: Path, name: str, init_text: str = "") -> Path:
+    d = parent / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "__init__.py").write_text(init_text)
+    return d
+
+
+def _internal_nodes(g: nx.DiGraph) -> set[str]:
+    return {n for n, d in g.nodes(data=True) if not d.get("external")}
+
+
+def _edge(data: dict, src: str, dst: str) -> dict:
+    return next(e for e in data["edges"] if e["source"] == src and e["target"] == dst)
+
+
 def test_package_init_edges_are_not_in_the_built_graph(project: Path):
     """The built graph records written imports only. Pinned because the reach
     feature depends on this being false, and a later change that started adding
@@ -103,13 +118,10 @@ def test_with_package_init_edges_leaves_the_original_untouched(project: Path):
     assert augmented["myapp.sub.leaf"]["myapp.sub"]["implicit"] == "package_init"
 
 
-def test_with_package_init_edges_preserves_a_real_edge(tmp_path: Path):
+def test_with_package_init_edges_preserves_a_real_edge(tmp_path: Path, pkg: Path):
     """A written `from . import x` edge must keep its line numbers, not be
     overwritten by an implicit one that happens to connect the same pair."""
-    pkg_dir = tmp_path / "pkg"
-    pkg_dir.mkdir()
-    (pkg_dir / "__init__.py").write_text("")
-    (pkg_dir / "child.py").write_text("import pkg\n")
+    (pkg / "child.py").write_text("import pkg\n")
 
     augmented = with_package_init_edges(build_graph(tmp_path))
 
@@ -119,7 +131,7 @@ def test_with_package_init_edges_preserves_a_real_edge(tmp_path: Path):
 
 def test_discovers_internal_modules(project: Path):
     g = build_graph(project)
-    internal = {n for n, d in g.nodes(data=True) if not d.get("external")}
+    internal = _internal_nodes(g)
     assert internal == {
         "myapp",
         "myapp.core",
@@ -238,7 +250,7 @@ def test_over_dotted_relative_import_from_package_injects_no_node(tmp_path: Path
     g = build_graph(tmp_path)
     assert "other" not in g.nodes
     assert not any(t == "other" for _, t in g.edges)
-    internal = {n for n, d in g.nodes(data=True) if not d.get("external")}
+    internal = _internal_nodes(g)
     assert internal == {"proj", "proj.regular", "proj.sub"}
 
 
@@ -266,7 +278,7 @@ def test_ignored_dirs_are_skipped(tmp_path: Path, pkg: Path):
     (venv_pkg / "__init__.py").write_text("")
     (venv_pkg / "noise.py").write_text("import sys\n")
     g = build_graph(tmp_path)
-    internal = {n for n, d in g.nodes(data=True) if not d.get("external")}
+    internal = _internal_nodes(g)
     assert "pkg" in internal and "pkg.real" in internal
     assert not any(n.startswith("fake") for n in internal)
 
@@ -286,7 +298,7 @@ def test_monorepo_with_two_top_level_packages(tmp_path: Path):
     g = build_graph(tmp_path)
     assert g.has_edge("alpha.core", "alpha.util")
     assert g.has_edge("beta.main", "beta.core")
-    assert g.has_edge("beta.main", "alpha.core")  # cross-package internal edge
+    assert g.has_edge("beta.main", "alpha.core")
 
 
 def test_wildcard_import_creates_single_edge_to_module(tmp_path: Path, pkg: Path):
@@ -363,13 +375,9 @@ def test_wildcard_reexport_does_not_crash(tmp_path: Path, pkg: Path):
     assert g.has_edge("pkg.consumer", "pkg")
 
 
-def test_reexport_chain_two_hops(tmp_path: Path):
-    pkg = tmp_path / "pkg"
-    pkg.mkdir()
-    sub = pkg / "sub"
-    sub.mkdir()
+def test_reexport_chain_two_hops(tmp_path: Path, pkg: Path):
+    sub = _mkpkg(pkg, "sub", "from .impl import Foo\n")
     (pkg / "__init__.py").write_text("from .sub import Foo\n")
-    (sub / "__init__.py").write_text("from .impl import Foo\n")
     (sub / "impl.py").write_text("class Foo: ...\n")
     (pkg / "consumer.py").write_text("from pkg import Foo\n")
     g = build_graph(tmp_path)
@@ -378,33 +386,23 @@ def test_reexport_chain_two_hops(tmp_path: Path):
     assert not g.has_edge("pkg.consumer", "pkg")
 
 
-def test_reexport_chain_three_hops(tmp_path: Path):
-    pkg = tmp_path / "pkg"
-    pkg.mkdir()
-    sub = pkg / "sub"
-    sub.mkdir()
-    deep = sub / "deep"
-    deep.mkdir()
+def test_reexport_chain_three_hops(tmp_path: Path, pkg: Path):
+    sub = _mkpkg(pkg, "sub", "from .deep import Foo\n")
+    deep = _mkpkg(sub, "deep", "from .impl import Foo\n")
     (pkg / "__init__.py").write_text("from .sub import Foo\n")
-    (sub / "__init__.py").write_text("from .deep import Foo\n")
-    (deep / "__init__.py").write_text("from .impl import Foo\n")
     (deep / "impl.py").write_text("class Foo: ...\n")
     (pkg / "consumer.py").write_text("from pkg import Foo\n")
     g = build_graph(tmp_path)
     assert g.has_edge("pkg.consumer", "pkg.sub.deep.impl")
 
 
-def test_reexport_chain_circular_does_not_loop(tmp_path: Path):
+def test_reexport_chain_circular_does_not_loop(tmp_path: Path, pkg: Path):
     # pkg/__init__.py re-exports Foo from pkg.a, and pkg.a/__init__.py
     # re-exports Foo from pkg (an evil-twin loop). The chain follower
     # must not infinite-loop; it should bail and leave the entry pointing
     # at the first hop.
-    pkg = tmp_path / "pkg"
-    pkg.mkdir()
-    a = pkg / "a"
-    a.mkdir()
+    _mkpkg(pkg, "a", "from pkg import Foo\n")
     (pkg / "__init__.py").write_text("from .a import Foo\n")
-    (a / "__init__.py").write_text("from pkg import Foo\n")
     (pkg / "consumer.py").write_text("from pkg import Foo\n")
     # Just assert build_graph terminates; the resulting edge can land at
     # either pkg or pkg.a depending on how the cycle is broken, but the
@@ -413,16 +411,12 @@ def test_reexport_chain_circular_does_not_loop(tmp_path: Path):
     assert g.number_of_nodes() > 0
 
 
-def test_reexport_chain_does_not_resolve_different_names(tmp_path: Path):
+def test_reexport_chain_does_not_resolve_different_names(tmp_path: Path, pkg: Path):
     # pkg/__init__.py re-exports Foo from pkg.sub, but pkg.sub/__init__.py
     # only has a re-export for Bar, not Foo. The chain follower must not
     # mis-attribute Foo to wherever Bar lives.
-    pkg = tmp_path / "pkg"
-    pkg.mkdir()
-    sub = pkg / "sub"
-    sub.mkdir()
+    sub = _mkpkg(pkg, "sub", "from .impl import Bar\n")
     (pkg / "__init__.py").write_text("from .sub import Foo\n")
-    (sub / "__init__.py").write_text("from .impl import Bar\n")
     (sub / "impl.py").write_text("class Bar: ...\n")
     (pkg / "consumer.py").write_text("from pkg import Foo\n")
     g = build_graph(tmp_path)
@@ -443,7 +437,7 @@ def test_extra_roots_treats_directory_without_init_as_package(tmp_path: Path):
     (app / "main.py").write_text("from app.libs.db import x\n")
     assert build_graph(tmp_path).number_of_nodes() == 0
     g = build_graph(tmp_path, extra_roots=("app",))
-    internal = {n for n, d in g.nodes(data=True) if not d.get("external")}
+    internal = _internal_nodes(g)
     assert "app.main" in internal
     assert "app.libs.db" in internal
     assert g.has_edge("app.main", "app.libs.db")
@@ -483,7 +477,7 @@ def test_graph_to_dict_preserves_edge_line_numbers(tmp_path: Path, pkg: Path):
     (pkg / "b.py").write_text("")
 
     data = graph_to_dict(build_graph(tmp_path))
-    edge = next(e for e in data["edges"] if e["source"] == "pkg.a" and e["target"] == "pkg.b")
+    edge = _edge(data, "pkg.a", "pkg.b")
     assert edge["lines"] == (1, 3, 4)
 
 
@@ -619,13 +613,11 @@ def test_call_through_from_import(tmp_path: Path, pkg: Path):
     assert edge["call_count"] == 2
 
 
-def test_call_through_reexport_chain(tmp_path: Path):
+def test_call_through_reexport_chain(tmp_path: Path, pkg: Path):
     # Re-exports must route calls to the canonical source module the same
     # way imports do; landing them on the re-exporting package instead
     # would inflate that package's coupling metrics with traffic that
     # logically belongs elsewhere.
-    pkg = tmp_path / "pkg"
-    pkg.mkdir()
     (pkg / "__init__.py").write_text("from .impl import Foo\n")
     (pkg / "impl.py").write_text("class Foo:\n    pass\n")
     (pkg / "consumer.py").write_text("from pkg import Foo\nFoo()\n")
@@ -638,7 +630,7 @@ def test_graph_to_dict_includes_call_attrs(tmp_path: Path, pkg: Path):
     (pkg / "a.py").write_text("from pkg import b\nb.do()\n")
     (pkg / "b.py").write_text("def do():\n    pass\n")
     data = graph_to_dict(build_graph(tmp_path))
-    edge = next(e for e in data["edges"] if e["source"] == "pkg.a" and e["target"] == "pkg.b")
+    edge = _edge(data, "pkg.a", "pkg.b")
     assert edge["call_count"] == 1
     assert edge["call_lines"] == (2,)
     assert "call" in edge["kinds"]
@@ -696,11 +688,11 @@ def test_build_graph_skips_file_that_vanishes_mid_build(project: Path, monkeypat
 
     monkeypatch.setattr(graph_mod, "parse_file", flaky_parse_file)
 
-    g = build_graph(project)  # must not raise
+    g = build_graph(project)
 
-    internal = {n for n, d in g.nodes(data=True) if not d.get("external")}
-    assert "myapp.utils" not in internal  # the vanished module is dropped
-    assert "myapp.core" in internal  # the rest of the build survives
+    internal = _internal_nodes(g)
+    assert "myapp.utils" not in internal
+    assert "myapp.core" in internal
 
 
 # --- scan-size guard (#216) ---------------------------------------------------
@@ -718,7 +710,7 @@ def _write_flat_package(root: Path, name: str, n_modules: int) -> None:
 def test_build_graph_unguarded_by_default(tmp_path: Path):
     # Direct/library callers (max_modules unset) are never guarded.
     _write_flat_package(tmp_path, "pkg", 5)
-    g = build_graph(tmp_path)  # must not raise
+    g = build_graph(tmp_path)
     assert g.number_of_nodes() >= 5
 
 
@@ -739,14 +731,14 @@ def test_build_graph_under_limit_ok(tmp_path: Path):
 
 def test_build_graph_zero_disables_guard(tmp_path: Path):
     _write_flat_package(tmp_path, "pkg", 5)
-    g = build_graph(tmp_path, max_modules=0)  # 0 = disabled, must not raise
+    g = build_graph(tmp_path, max_modules=0)  # 0 = disabled
     assert g.number_of_nodes() >= 5
 
 
 def test_effective_max_modules_resolution():
-    assert effective_max_modules(None) == DEFAULT_MAX_MODULES  # unset -> default
-    assert effective_max_modules(0) is None  # explicitly disabled
-    assert effective_max_modules(2500) == 2500  # custom ceiling
+    assert effective_max_modules(None) == DEFAULT_MAX_MODULES
+    assert effective_max_modules(0) is None
+    assert effective_max_modules(2500) == 2500
 
 
 def test_graph_to_dict_shape_is_pinned_by_hand():
