@@ -117,7 +117,7 @@ def test_is_watched_py_keeps_files_under_an_ignored_ancestor(tmp_path: Path):
     m = IndexManager(proj.resolve(), db_path=tmp_path / "index-ancestor.db")
     try:
         assert m._is_watched_py(target.resolve()) is True
-        # In-root ignored dirs still filter.
+        # Ignoring ancestors must not weaken the in-root filter.
         ignored = proj / ".venv" / "lib" / "foo.py"
         ignored.parent.mkdir(parents=True)
         ignored.write_text("")

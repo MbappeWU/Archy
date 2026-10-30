@@ -514,7 +514,7 @@ def test_score_accepts_an_existing_project_directory(acyclic_project: Path):
         create_server(), "archy_score", {"path": str(acyclic_project)}
     )
     assert structured is not None
-    assert structured["result"]["inputs"]["module_count"] == 3
+    assert structured["result"]["module_count"] == 3
 
 
 def test_archy_graph_under_an_ignored_ancestor_still_counts_modules(tmp_path: Path):
@@ -532,12 +532,7 @@ def test_archy_graph_under_an_ignored_ancestor_still_counts_modules(tmp_path: Pa
         {"path": str(proj.resolve()), "response_format": "summary"},
     )
     assert structured is not None
-    payload = structured["result"]
-    # summary branch exposes inputs.module_count; full may nest differently
-    module_count = payload.get("inputs", {}).get("module_count")
-    if module_count is None:
-        module_count = payload.get("module_count")
-    assert module_count == 3
+    assert structured["result"]["module_count"] == 3
 
 
 # --- #226 concise-by-default response shaping ---------------------------------
