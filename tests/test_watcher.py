@@ -106,6 +106,26 @@ def test_is_watched_py_filters(project: Path, tmp_path: Path):
         m.stop()
 
 
+def test_is_watched_py_keeps_files_under_an_ignored_ancestor(tmp_path: Path):
+    """#517: a project living under build/ must still watch its own .py files."""
+    proj = tmp_path / "build" / "proj"
+    pkg = proj / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    target = pkg / "a.py"
+    target.write_text("x = 1\n")
+    m = IndexManager(proj.resolve(), db_path=tmp_path / "index-ancestor.db")
+    try:
+        assert m._is_watched_py(target.resolve()) is True
+        # In-root ignored dirs still filter.
+        ignored = proj / ".venv" / "lib" / "foo.py"
+        ignored.parent.mkdir(parents=True)
+        ignored.write_text("")
+        assert m._is_watched_py(ignored.resolve()) is False
+    finally:
+        m.stop()
+
+
 def test_debounced_fire_runs_sync(project: Path, tmp_path: Path):
     m = _manager(project, tmp_path)
     try:

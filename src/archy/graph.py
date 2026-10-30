@@ -553,7 +553,7 @@ def _find_package_roots(
     """Return absolute paths to top-level package directories under root."""
     package_dirs: set[Path] = set()
     for path in root.rglob("__init__.py"):
-        if _is_ignored(path, ignored):
+        if _is_ignored(path, ignored, root):
             continue
         package_dirs.add(path.parent.resolve())
 
@@ -577,13 +577,26 @@ def _find_package_roots(
 
 def _iter_python_files(root: Path, ignored: frozenset[str]) -> Iterable[Path]:
     for path in sorted(root.rglob("*.py")):
-        if _is_ignored(path, ignored):
+        if _is_ignored(path, ignored, root):
             continue
         yield path
 
 
-def _is_ignored(path: Path, ignored: frozenset[str]) -> bool:
-    return any(part in ignored for part in path.parts)
+def _is_ignored(path: Path, ignored: frozenset[str], root: Path) -> bool:
+    """Return True when an ignored name appears under the scan root.
+
+    Ancestors of ``root`` itself must not count: a project that merely lives
+    under a directory named ``build`` / ``dist`` / ``venv`` would otherwise
+    scan as empty when given an absolute path (#517).
+    """
+    try:
+        rel_parts = path.resolve().relative_to(root.resolve()).parts
+    except ValueError:
+        # Path is outside the scan root (watcher unit tests pass synthetic
+        # absolutes). Fall back to the full parts list so in-path ignored
+        # names like ``.venv`` still filter.
+        rel_parts = path.parts
+    return any(part in ignored for part in rel_parts)
 
 
 def _qualname_for(py_file: Path, package_roots: list[Path]) -> str | None:

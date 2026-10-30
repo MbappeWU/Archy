@@ -162,7 +162,11 @@ class IndexManager:
         """
         if path.suffix != ".py":
             return False
-        return not any(part in self._ignored_dirs for part in path.parts)
+        try:
+            rel_parts = path.resolve().relative_to(self.root.resolve()).parts
+        except ValueError:
+            rel_parts = path.parts
+        return not any(part in self._ignored_dirs for part in rel_parts)
 
     def _reset_timer(self) -> None:
         with self._lock:

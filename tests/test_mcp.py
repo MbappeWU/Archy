@@ -517,6 +517,29 @@ def test_score_accepts_an_existing_project_directory(acyclic_project: Path):
     assert structured["result"]["inputs"]["module_count"] == 3
 
 
+def test_archy_graph_under_an_ignored_ancestor_still_counts_modules(tmp_path: Path):
+    """#517: MCP abs path under build/ must not report module_count 0."""
+    proj = tmp_path / "build" / "proj"
+    pkg = proj / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "a.py").write_text("from pkg.b import thing\n")
+    (pkg / "b.py").write_text("")
+
+    _content, structured = _call_tool(
+        create_server(),
+        "archy_graph",
+        {"path": str(proj.resolve()), "response_format": "summary"},
+    )
+    assert structured is not None
+    payload = structured["result"]
+    # summary branch exposes inputs.module_count; full may nest differently
+    module_count = payload.get("inputs", {}).get("module_count")
+    if module_count is None:
+        module_count = payload.get("module_count")
+    assert module_count == 3
+
+
 # --- #226 concise-by-default response shaping ---------------------------------
 
 

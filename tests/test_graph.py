@@ -287,6 +287,46 @@ def test_ignored_dirs_are_skipped(tmp_path: Path, pkg: Path):
     assert not any(n.startswith("fake") for n in internal)
 
 
+def _tiny_pkg_project(root: Path) -> Path:
+    """pkg/ with a.py importing b.py. Returns the project root."""
+    pkg = root / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "a.py").write_text("from pkg import b\n")
+    (pkg / "b.py").write_text("x = 1\n")
+    return root
+
+
+@pytest.mark.parametrize("ancestor", ["build", "dist", "venv"])
+def test_ignored_ancestor_dir_does_not_empty_an_absolute_scan(
+    tmp_path: Path, ancestor: str
+):
+    """#517: living under build/dist/venv must not zero an abs-path scan."""
+    under_ancestor = _tiny_pkg_project(tmp_path / ancestor / "proj")
+    baseline = _tiny_pkg_project(tmp_path / "plain" / "proj")
+
+    g_abs = build_graph(under_ancestor.resolve())
+    g_base = build_graph(baseline.resolve())
+
+    assert set(g_abs.nodes) == set(g_base.nodes) == {"pkg", "pkg.a", "pkg.b"}
+    assert set(g_abs.edges) == set(g_base.edges)
+    assert g_abs.has_edge("pkg.a", "pkg.b")
+
+
+def test_build_dir_inside_the_scan_root_is_still_skipped(tmp_path: Path):
+    """#517: relative-to-root ignore must keep in-root build/ semantics."""
+    _tiny_pkg_project(tmp_path)
+    noise = tmp_path / "build" / "noise"
+    noise.mkdir(parents=True)
+    (noise / "__init__.py").write_text("")
+    (noise / "x.py").write_text("import os\n")
+
+    g = build_graph(tmp_path.resolve())
+    internal = {n for n, d in g.nodes(data=True) if not d.get("external")}
+    assert {"pkg", "pkg.a", "pkg.b"} <= internal
+    assert not any(n.startswith("noise") or n.startswith("build") for n in internal)
+
+
 def test_monorepo_with_two_top_level_packages(tmp_path: Path):
     """Two unrelated packages under one root, each with internal imports."""
     a = tmp_path / "alpha"
