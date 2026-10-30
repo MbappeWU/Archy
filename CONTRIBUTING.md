@@ -122,8 +122,9 @@ Python style notes the review tooling enforces. The short version:
 - `from __future__ import annotations` at the top of every module.
 - PEP 604 type syntax (`list[X]`, `str | None`).
 - `pathlib.Path` over `os.path`.
-- Frozen dataclasses for value objects; tuples (not lists) for their
-  sequence fields.
+- Frozen pydantic models (`model_config = ConfigDict(frozen=True)`) for
+  value objects; tuples (not lists) for their sequence fields (see `AGENTS.md`
+  on `@computed_field` and `model_dump()`).
 - ruff line length 100, target py310.
 - Comments explain *why*, not *what*. If a comment merely narrates the
   code, delete it.
