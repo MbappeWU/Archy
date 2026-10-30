@@ -897,7 +897,7 @@ def duplicates(
     _require(min_members >= 2, "members", ">= 2", min_members)
     try:
         modules, parse_results = parse_project(
-            path, **graph_kwargs(path), max_modules=resolve_max_modules(path)
+            path, **_graph_kwargs_or_exit(path), max_modules=resolve_max_modules(path)
         )
     except ScanTooLargeError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -1531,7 +1531,7 @@ def index_sync(path: Path) -> None:
 
     conn = open_index(default_db_path(path))
     try:
-        modules = discover_modules(path, **graph_kwargs(path))
+        modules = discover_modules(path, **_graph_kwargs_or_exit(path))
         # Apply the same scan-size backstop as the graph commands: `index sync`
         # reparses every changed file, so a stray 40k-file vendored dir would
         # wedge here too even though it never builds the graph (#216).
@@ -1985,7 +1985,7 @@ def conventions(
         # absence from one is an answer rather than an artefact of truncation.
         try:
             view = compute_module_view(
-                path, module, **graph_kwargs(path), include_tests=include_tests
+                path, module, **_graph_kwargs_or_exit(path), include_tests=include_tests
             )
         except LookupError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -1996,7 +1996,7 @@ def conventions(
         )
         return
     report = compute_conventions(
-        path, **graph_kwargs(path), min_family=min_family, include_tests=include_tests
+        path, **_graph_kwargs_or_exit(path), min_family=min_family, include_tests=include_tests
     )
     if emit_headers:
         _emit_headers(
@@ -2046,14 +2046,16 @@ def brief(path: Path, top_n: int, with_contracts: bool, include_tests: bool, fmt
     the briefing arrives without being asked for, which means one invocation a
     hook or a harness can make.
 
-    Advisory, always exits 0. It reports; `check` and `contracts` gate.
+    Advisory on content (always exits 0 when the config parses). A malformed
+    archy.yaml is a one-line Error and exit 1, same as the other graph
+    commands (#524); `check` and `contracts` remain the gates.
 
     \b
     The same briefing is the `archy_brief` MCP tool (#427), with the same
     field names in its payload as `--format json` here.
     """
     _require(top_n >= 1, "top", ">= 1", top_n)
-    kw = graph_kwargs(path)
+    kw = _graph_kwargs_or_exit(path)
     report = compute_conventions(path, **kw, include_tests=include_tests)
 
     coverage = config = None
@@ -2063,9 +2065,8 @@ def brief(path: Path, top_n: int, with_contracts: bool, include_tests: bool, fmt
             config = load_config(config_path)
             coverage = compute_coverage(build_graph(path, **kw), config)
         except LayerConfigError:
-            # A malformed archy.yaml is worth reporting from `check`, which gates
-            # on it. Here it would replace the whole briefing with one error, so
-            # the section says nothing rather than the command saying nothing.
+            # Parse failures already exit via `_graph_kwargs_or_exit` above. This
+            # catch only blanks coverage if a late load fails after kwargs succeeded.
             coverage = config = None
 
     contracts = _run_check_contracts(path, None) if with_contracts else None
@@ -2102,10 +2103,31 @@ def brief(path: Path, top_n: int, with_contracts: bool, include_tests: bool, fmt
         click.echo(_brief_to_text(report, coverage, config, contracts, top_n=top_n))
 
 
+def _graph_kwargs_or_exit(path: Path) -> dict:
+    """`graph_kwargs` for CLI callers: turn LayerConfigError into ClickException.
+
+    `graph_kwargs` itself stays raising so MCP can map LayerConfigError to isError.
+    Every CLI site that used to call `graph_kwargs(path)` (and `_load_graph`) goes
+    through this helper or the matching catch in `_load_graph`, so a malformed
+    archy.yaml prints a one-line Error instead of a traceback (#524, same class as #207).
+    """
+    try:
+        return graph_kwargs(path)
+    except LayerConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 def _load_graph(path: Path, *, internal_only: bool) -> nx.DiGraph:
     try:
-        g = build_graph(path, **graph_kwargs(path), max_modules=resolve_max_modules(path))
+        g = build_graph(
+            path,
+            **_graph_kwargs_or_exit(path),
+            max_modules=resolve_max_modules(path),
+        )
     except ScanTooLargeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except LayerConfigError as exc:
+        # resolve_max_modules also loads the config; keep the same one-line Error.
         raise click.ClickException(str(exc)) from exc
     if internal_only:
         external = {n for n, d in g.nodes(data=True) if d.get("external")}
@@ -3572,7 +3594,7 @@ def _emit_headers(
     headers = compute_headers(
         report,
         path,
-        discover_modules(path, **graph_kwargs(path)),
+        discover_modules(path, **_graph_kwargs_or_exit(path)),
         include_tests=include_tests,
     )
     stale: list[str] = []
