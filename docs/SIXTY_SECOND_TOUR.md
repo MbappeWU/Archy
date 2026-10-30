@@ -4,7 +4,7 @@ Zero to your first archy score in under a minute. Every command below is copy-pa
 
 ## Requirements
 
-- Python 3.10 or newer. archy depends on `mcp>=1.27.1` which requires 3.10+. If `python --version` reports 3.9 or older, install a newer Python first (`brew install python@3.12` on macOS, `apt install python3.12` on Debian/Ubuntu, or use [uv](https://docs.astral.sh/uv/) which manages Python versions for you).
+- Python 3.10 or newer. archy depends on `mcp>=1.28.1,<3` which requires 3.10+. If `python --version` reports 3.9 or older, install a newer Python first (`brew install python@3.12` on macOS, `apt install python3.12` on Debian/Ubuntu, or use [uv](https://docs.astral.sh/uv/) which manages Python versions for you).
 - A Python project to point archy at. Any package with `__init__.py` files will work; archy does not need build artifacts, virtualenvs, or run-time imports.
 
 ## Install
@@ -34,18 +34,19 @@ archy score .
 Expected output (numbers will differ for your project):
 
 ```
-# archy score: 0.620
-modularity:  0.583  (9 communities, raw Q=0.375)
+# archy score: 0.629
+modularity:  0.333  (2 communities, raw Q=0.000)
+  call-weighted Q=0.000  (calls roughly track community structure)
 acyclicity:  1.000  (0 cycles, tangle=0.000)
-depth:       0.615  (max depth 5)
-equality:    0.413  (Gini=0.587)
-# graph: 38 modules, 67 edges
-# propagation_cost: 0.1392  (diagnostic, not in score)
-# calls: 425 resolved across 60 edge(s), 7.08/edge  (diagnostic)
-# cc: 544 functions, mean=2.42, max=24  (diagnostic, per-function McCabe)
+depth:       0.889  (max depth 1)
+equality:    0.333  (Gini=0.667)
+complexity:  1.000  (0 functions, cc_mean=0.00, cc_max=0)
+# graph: 3 modules, 1 edges
+# propagation_cost: 0.4444  (diagnostic, not in score; MacCormack reverse-reach fraction)
+# calls: 0 resolved across 0 edge(s), 0.00/edge  (diagnostic, not in score)
 ```
 
-The headline number is the geometric mean of the four sub-axes (modularity, acyclicity, depth, equality). Higher is better; 1.0 is the ceiling. See [`SCORING.md`](SCORING.md) for how each axis is computed and how to read the bands.
+The headline number is the geometric mean of the five sub-axes (modularity, acyclicity, depth, equality, complexity). Higher is better; 1.0 is the ceiling. See [`SCORING.md`](SCORING.md) for how each axis is computed and how to read the bands.
 
 ## Three things to try next
 
