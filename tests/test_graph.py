@@ -298,9 +298,7 @@ def _tiny_pkg_project(root: Path) -> Path:
 
 
 @pytest.mark.parametrize("ancestor", ["build", "dist", "venv"])
-def test_ignored_ancestor_dir_does_not_empty_an_absolute_scan(
-    tmp_path: Path, ancestor: str
-):
+def test_ignored_ancestor_dir_does_not_empty_an_absolute_scan(tmp_path: Path, ancestor: str):
     """#517: living under build/dist/venv must not zero an abs-path scan."""
     under_ancestor = _tiny_pkg_project(tmp_path / ancestor / "proj")
     baseline = _tiny_pkg_project(tmp_path / "plain" / "proj")
