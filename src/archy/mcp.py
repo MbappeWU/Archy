@@ -807,7 +807,7 @@ def _project_dir(path: str) -> Path:
     raise ValueError(f"Directory '{path}' does not exist.")
 
 
-def _with_expected_refusal_as_tool_error(fn):  # noqa: ANN001
+def _with_expected_refusal_as_tool_error(fn):
     """Re-raise expected refusals as ToolError so mcp 2.x keeps the reason (#636).
 
     mcp 2.x drops the message of a tool's ``ValueError``, surfacing only
@@ -818,7 +818,7 @@ def _with_expected_refusal_as_tool_error(fn):  # noqa: ANN001
     from functools import wraps
 
     @wraps(fn)
-    def wrapped(*args, **kwargs):  # noqa: ANN002, ANN003
+    def wrapped(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except (ValueError, LookupError) as exc:
@@ -832,10 +832,10 @@ def _register_tools(server: Server) -> None:
     # LookupError refusals to ToolError without editing each body (#636).
     _decorate_tool = server.tool
 
-    def tool(**kwargs):  # noqa: ANN003
+    def tool(**kwargs):
         register = _decorate_tool(**kwargs)
 
-        def decorate(fn):  # noqa: ANN001
+        def decorate(fn):
             return register(_with_expected_refusal_as_tool_error(fn))
 
         return decorate
