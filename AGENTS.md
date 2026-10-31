@@ -98,14 +98,13 @@ to one of `archy.cli` and every `tests.*cli*` module would be a guess. Search fo
 an existing ticket by the symptom ("empty", "exits 0"), not only the mechanism:
 #556 already described the dsm case and a mechanism-worded search missed it.
 
-**mcp 2.x drops a tool's `ValueError` text** (#636). The call surfaces
-`UnexpectedToolError("Error executing tool <name>")`, a `ToolError` subclass, with
-no message; a tool that raises `ToolError(msg)` itself keeps it. Pin the exact message
-on the direct `_run_*` call and assert only the `ToolError` type through
-`_call_tool`; a test that matched the text passed on mcp 1.x and failed only the
-`mcp 2.x compatibility` job. Reproduce that job locally with its own install
-(`uv venv`, then `uv pip install -e ".[contracts]" "mcp>=2,<3" pytest
-pytest-snapshot`) before pushing a change to a tool's error path.
+**mcp 2.x used to drop a tool's `ValueError` text** (#636, fixed). Expected
+refusals (`ValueError` / `LookupError`) are re-raised as `ToolError` at the tool
+boundary so the reason reaches agents on both majors. Pin the exact message on
+the direct `_run_*` call and through `_call_tool`. Reproduce the
+`mcp 2.x compatibility` job locally with its own install (`uv venv`, then
+`uv pip install -e ".[contracts]" "mcp>=2,<3" pytest pytest-snapshot`) before
+pushing a change to a tool's error path.
 
 ## Tests that cannot fail
 
