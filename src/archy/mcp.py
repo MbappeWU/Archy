@@ -840,7 +840,7 @@ def _register_tools(server: Server) -> None:
 
         return decorate
 
-    server.tool = tool  # type: ignore[method-assign]
+    server.tool = tool  # ty: ignore[invalid-assignment]
 
     @server.tool(
         name="archy_score",
