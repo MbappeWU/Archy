@@ -195,7 +195,7 @@ from archy.layers import (
     find_violations,
     load_config,
 )
-from archy.mcp_compat import Server, make_server
+from archy.mcp_compat import Server, ToolError, make_server
 from archy.reach import compute_propagation_cost
 from archy.refactor import DEFAULT_MIN_RISK, compute_refactor_priorities
 from archy.risk import compute_edit_risk
@@ -807,7 +807,41 @@ def _project_dir(path: str) -> Path:
     raise ValueError(f"Directory '{path}' does not exist.")
 
 
+def _with_expected_refusal_as_tool_error(fn):  # noqa: ANN001
+    """Re-raise expected refusals as ToolError so mcp 2.x keeps the reason (#636).
+
+    mcp 2.x drops the message of a tool's ``ValueError``, surfacing only
+    ``Error executing tool <name>``. Raising ``ToolError`` directly keeps the
+    text on both majors. Unexpected exceptions stay generic.
+    """
+
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapped(*args, **kwargs):  # noqa: ANN002, ANN003
+        try:
+            return fn(*args, **kwargs)
+        except (ValueError, LookupError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    return wrapped
+
+
 def _register_tools(server: Server) -> None:
+    # One registration wrapper so every tool converts expected ValueError /
+    # LookupError refusals to ToolError without editing each body (#636).
+    _decorate_tool = server.tool
+
+    def tool(**kwargs):  # noqa: ANN003
+        register = _decorate_tool(**kwargs)
+
+        def decorate(fn):  # noqa: ANN001
+            return register(_with_expected_refusal_as_tool_error(fn))
+
+        return decorate
+
+    server.tool = tool  # type: ignore[method-assign]
+
     @server.tool(
         name="archy_score",
         title="Score project structure",
