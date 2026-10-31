@@ -12,9 +12,8 @@ contract tests (layer 4) parse back; the filesystem only enters when
 :func:`apply_plan` feeds those renders through a :class:`WriteSystem`.
 
 archy:owns        AgentAdapter, FileAction, Scope, apply_plan, apply_uninstall,
-                  render_plan, write_rendered,
                   delete_file, instructions_block, local_root, permission_patterns,
-                  remove_instructions, upsert_instructions
+                  remove_instructions, render_plan, upsert_instructions, write_rendered
 archy:mirrored-by delete_file -> archy.install.adapters.continue_,
                   archy.install.adapters.cursor,
                   local_root -> archy.install.adapters.claude,
